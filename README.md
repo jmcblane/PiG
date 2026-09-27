@@ -12,6 +12,55 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 - macOS 14+ and a Swift toolchain (Xcode or compatible Swift installation)
 - `pi` installed
 
+## Features
+
+### Projects & sessions
+
+- Sidebar with projects and their sessions, plus a Files tab
+- Project home page listing recent sessions
+- Quick Chats: throwaway chats that don't belong to a project
+- Session names generated automatically (by the session's model, a model you pick, or Apple Intelligence on the Mac)
+- Session tree view: jump to any earlier point in a conversation and fork a new session from a prompt
+- Search across all sessions (⌘F) and browse archived sessions
+- Several sessions can run at once; idle ones can be unloaded or reloaded
+- macOS notification when a reply finishes while you're in another app
+
+### Chat & composer
+
+- Markdown rendering with syntax-highlighted code previews
+- Tool activity groups that expand to show commands and file reads
+- Detailed views of subagent runs
+- Optional display of the model's thinking traces
+- Attach images by pasting or dragging
+- `@` completion for files and skills, and slash-command suggestions
+- Queue steering and follow-up messages while the agent works (Option-Up returns queued messages to the composer)
+- Context-usage meter in the composer
+
+### Models
+
+- Model and thinking-level pickers for each session
+- Quick Model shortcuts (⌘1–⌘5)
+- Default model and thinking level for new sessions
+- A schedule that picks the default model by time of day and work days
+- Usage-limit meters for ChatGPT/Codex, Claude and Grok, shown only when you have credentials for that provider
+
+### pi integration
+
+- Extensions & Resources popover for turning extensions and skills on or off per chat
+- Support for extension UI: prompts (select, confirm, input, editor), notifications, status items, widgets, window title
+- Pi updates: check for them, update pi and its extensions, and a "What's New" view
+
+### Workspace
+
+- File tree: create, rename and trash files; reveal in Finder; open in Terminal; copy paths and references
+- Custom actions: a button in the title bar that runs your saved shell commands for the project, with output shown in the chat
+
+### Appearance
+
+- 23 themes, including Nord, Dracula, Tokyo Night, Rosé Pine and GitHub Light
+- Adjustable text size (⌘+ / ⌘−)
+- Native SwiftUI app for macOS 14+
+
 ## Build
 
 ```sh
