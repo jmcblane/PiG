@@ -1,5 +1,10 @@
 # PiG
 
+<p>
+  <img src="images/pig-main-window.png" alt="PiG main window" width="49%">
+  <img src="images/pig-chat-session.png" alt="PiG chat session" width="49%">
+</p>
+
 PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 
 ## Requirements
