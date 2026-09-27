@@ -1,0 +1,11 @@
+.build/
+.DS_Store
+.swiftpm/
+DerivedData/
+dist/
+Vendor/GhosttyKit.xcframework/
+Vendor/ghostty-resources/
+*.xcuserdata
+archive/
+.claude/settings.local.json
+scripts/build-app.local.env
