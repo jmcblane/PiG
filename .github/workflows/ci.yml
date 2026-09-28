@@ -1,0 +1,53 @@
+# Tests every push to main. When VERSION names a version without a GitHub
+# release yet, also builds PiG.app and publishes it as release v<VERSION>.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test
+        run: swift test
+
+      - name: Check for existing release
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build app
+        if: steps.version.outputs.release == 'true'
+        env:
+          PIG_BUILD: ${{ github.run_number }}
+          PIG_SIGN_ID: "-"
+        run: scripts/build-app.sh
+
+      - name: Publish release
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          zip="PiG-$VERSION.zip"
+          ditto -c -k --keepParent dist/PiG.app "$zip"
+          gh release create "v$VERSION" "$zip" \
+            --target "$GITHUB_SHA" \
+            --title "PiG $VERSION" \
+            --generate-notes

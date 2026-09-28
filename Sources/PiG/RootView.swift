@@ -585,6 +585,7 @@ struct SessionsSidebarContent: View {
             .help("Open Settings")
             .accessibilityLabel("Open Settings")
             Spacer(minLength: 0)
+            AppUpdateButton(updates: model.appUpdates)
             SidebarUpdateButton(maintenance: model.piMaintenance)
             Button {
                 model.undoLastInboxDismissal()
@@ -731,6 +732,29 @@ private struct ExtensionOrStatusToast: View {
                             .help(text)
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Shown when a newer PiG release exists on GitHub; opens its release page.
+private struct AppUpdateButton: View {
+    @ObservedObject var updates: AppUpdateChecker
+
+    var body: some View {
+        if let release = updates.notice {
+            Button { updates.download() } label: {
+                Image(systemName: "arrow.down.app.fill")
+                    .frame(width: 26, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .foregroundStyle(Color.blue)
+            .help("PiG \(release.version) is available — click to download")
+            .accessibilityLabel("Download PiG \(release.version)")
+            .contextMenu {
+                Button("Download PiG \(release.version)") { updates.download() }
+                Divider()
+                Button("Dismiss Notice") { updates.dismiss() }
             }
         }
     }

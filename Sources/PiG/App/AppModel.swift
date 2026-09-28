@@ -136,6 +136,7 @@ final class AppModel: ObservableObject {
     @Published var customActionsByProject: [String: ProjectCustomActions] = [:]
     @Published private(set) var sessionLaunchExtensions: [PiResourceItem] = []
     let piMaintenance = PiMaintenanceController()
+    let appUpdates = AppUpdateChecker()
 
     private var terminationObserver: NSObjectProtocol?
     private var sessionRefreshGeneration = 0
@@ -266,6 +267,7 @@ final class AppModel: ObservableObject {
         piMaintenance.onModelsUpdated = { [weak self] in
             Task { await self?.refreshModelsAfterCatalogUpdate() }
         }
+        appUpdates.start()
         Task { [weak self] in
             guard let self else { return }
             await self.loadRegistry()

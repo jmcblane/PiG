@@ -35,6 +35,11 @@ struct PiGApp: App {
         .defaultSize(width: WindowLaunchDefaults.defaultSize.width, height: WindowLaunchDefaults.defaultSize.height)
         .windowResizability(.contentMinSize)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    Task { await model.appUpdates.check(manual: true) }
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Chat") {
                     model.showNewChatHome()
