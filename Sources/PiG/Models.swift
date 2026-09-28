@@ -721,7 +721,8 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
     var displayTitle: String {
         let tool = shortName
         guard let args = jsonObject(arguments) else {
-            return arguments.isEmpty ? tool.capitalized : "\(tool.capitalized) \(arguments.oneLine(max: 100))"
+            let label = Self.builtinTools.contains(tool) ? tool.capitalized : tool
+            return arguments.isEmpty ? label : "\(label) \(arguments.oneLine(max: 100))"
         }
 
         switch tool {
@@ -738,8 +739,46 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
         case "delegate_agent", "subagent":
             return "Subagent — \(subagentSummary(args))"
         default:
-            return "\(tool.capitalized) \(primaryArgument(args))".trimmingCharacters(in: .whitespaces)
+            return Self.genericTitle(name: tool, args: args)
         }
+    }
+
+    private static let builtinTools: Set<String> = ["read", "write", "edit", "bash", "subagent", "delegate_agent"]
+    private static let verbKeys = ["action", "operation"]
+    private static let subjectKeys = ["title", "path", "file_path", "reference", "ref", "query", "pattern", "url", "id", "command", "name"]
+
+    /// Title for tools without a dedicated case: `name [action] subject`, where
+    /// subject is the first well-known argument or up to three `key=value` scalars.
+    static func genericTitle(name: String, args: [String: Any]) -> String {
+        var parts = [name]
+        var verbKey: String?
+        for key in verbKeys {
+            if let verb = (args[key] as? String)?.nonEmptyTrimmed,
+               verb.count <= 40, !verb.contains(where: \.isWhitespace) {
+                parts.append(verb)
+                verbKey = key
+                break
+            }
+        }
+        if let subject = subjectKeys.lazy.compactMap({ args[$0].flatMap(scalarText) }).first {
+            parts.append(subject)
+        } else {
+            let pairs = args.keys.sorted()
+                .filter { $0 != verbKey }
+                .compactMap { key in args[key].flatMap(scalarText).map { "\(key)=\($0)" } }
+                .prefix(3)
+            parts.append(contentsOf: pairs)
+        }
+        return parts.joined(separator: " ").oneLine(max: 120)
+    }
+
+    private static func scalarText(_ value: Any) -> String? {
+        if let string = value as? String { return string.nonEmptyTrimmed }
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "true" : "false" }
+            return number.stringValue
+        }
+        return nil
     }
 
     var bashCommand: String? {
@@ -882,13 +921,6 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
               let old = edits.first?["oldText"] as? String else { return path }
         let lineCount = max(old.split(separator: "\n", omittingEmptySubsequences: false).count, 1)
         return lineCount > 1 ? "\(path) (\(lineCount) lines)" : path
-    }
-
-    private func primaryArgument(_ args: [String: Any]) -> String {
-        for key in ["title", "path", "reference", "ref", "query", "command"] {
-            if let value = string(args, key), !value.isEmpty { return value.oneLine(max: 100) }
-        }
-        return ""
     }
 
     private func jsonObject(_ json: String) -> [String: Any]? {

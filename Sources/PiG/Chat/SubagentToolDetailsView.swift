@@ -245,7 +245,8 @@ private struct SubagentPresentation: @unchecked Sendable {
     }
 
     private static func toolTitle(name: String, args: [String: Any]) -> String {
-        switch name.split(separator: ".").last.map(String.init) ?? name {
+        let shortName = name.split(separator: ".").last.map(String.init) ?? name
+        switch shortName {
         case "bash":
             return (args["description"] as? String)?.nonEmptyTrimmed
                 ?? (args["command"] as? String)?.nonEmptyTrimmed
@@ -257,8 +258,7 @@ private struct SubagentPresentation: @unchecked Sendable {
         case "edit":
             return "edit \((args["path"] as? String) ?? (args["file_path"] as? String) ?? "file")"
         default:
-            let summary = jsonString(args).oneLine(max: 100)
-            return summary == "{}" ? name : "\(name) \(summary)"
+            return ToolDisplay.genericTitle(name: shortName, args: args)
         }
     }
 }
