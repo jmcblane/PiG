@@ -1,10 +1,12 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 struct GeneralSettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var piExecutablePath = PiExecutablePreference.path ?? ""
     @State private var detectedPiPath = PiPaths.detectedPiExecutable.path
+    @State private var notificationsDenied = false
     @AppStorage(QuickChatsFolderPreference.key) private var quickChatsFolder = ""
 
     var body: some View {
@@ -16,17 +18,16 @@ struct GeneralSettingsView: View {
                     }
                 }
 
-                HStack {
-                    Text("Text size")
-                    Spacer()
-                    Button { model.textSizeStep -= 1 } label: { Image(systemName: "minus") }
-                        .disabled(model.textSizeStep == 0)
-                    Text("\(Int(TextSizePreference.steps[model.textSizeStep] * 100))%")
-                        .frame(width: 52)
-                    Button { model.textSizeStep += 1 } label: { Image(systemName: "plus") }
-                        .disabled(model.textSizeStep == TextSizePreference.steps.count - 1)
-                    Button("Actual Size") { model.textSizeStep = TextSizePreference.actualSizeStep }
-                        .disabled(model.textSizeStep == TextSizePreference.actualSizeStep)
+                LabeledContent("Text size") {
+                    HStack {
+                        Slider(value: textSizeBinding, in: 0...Double(TextSizePreference.steps.count - 1), step: 1)
+                            .accessibilityValue("\(textSizePercent)%")
+                        Text("\(textSizePercent)%")
+                            .monospacedDigit()
+                            .frame(width: 44, alignment: .trailing)
+                        Button("Reset") { model.textSizeStep = TextSizePreference.actualSizeStep }
+                            .disabled(model.textSizeStep == TextSizePreference.actualSizeStep)
+                    }
                 }
 
                 Picker("Project headers", selection: $model.projectHeaderStyle) {
@@ -36,20 +37,13 @@ struct GeneralSettingsView: View {
                 }
             }
 
-            Section("Pi executable") {
-                TextField("Override path", text: $piExecutablePath)
-                    .onChange(of: piExecutablePath) { _, value in PiExecutablePreference.path = value }
-                Text("Auto-detected: \(detectedPiPath == "/usr/bin/env" ? "pi not found" : detectedPiPath)")
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-
             Section("Sessions") {
                 Picker("Runtime", selection: $model.sessionRuntimePolicy) {
                     ForEach(SessionRuntimePolicy.allCases) { policy in
-                        Text(policy.displayName).tag(policy)
+                        Text(policy.displayName).tag(policy).help(policy.helpText)
                     }
                 }
+                .help(model.sessionRuntimePolicy.helpText)
 
                 Toggle("Show thinking traces", isOn: $model.showThinkingTraces)
                 Toggle("Accent composer on focus", isOn: $model.composerFocusAccent)
@@ -57,7 +51,7 @@ struct GeneralSettingsView: View {
 
             Section("Quick Chats") {
                 LabeledContent("Folder") {
-                    Text(quickChatsFolder.isEmpty ? PiPaths.defaultQuickChatsProject.path : PiPaths.quickChatsProject.path)
+                    Text(PiPaths.quickChatsProject.path)
                         .lineLimit(2)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
@@ -74,17 +68,51 @@ struct GeneralSettingsView: View {
                 }
             }
 
-            Section("Notifications") {
+            Section {
                 Toggle("Enable notifications", isOn: $model.notificationsEnabled)
+                if notificationsDenied {
+                    HStack {
+                        Label("Notifications are turned off for PiG in System Settings.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Button("Open System Settings") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    }
+                }
                 Button("Send test notification in 10 seconds") {
                     model.scheduleTestNotification()
                 }
                 .disabled(!model.notificationsEnabled)
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("The delay gives you time to switch to another app before the test notification arrives.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Pi executable") {
+                TextField("Override path", text: $piExecutablePath, prompt: Text(detectedPiPathLabel))
+                    .onChange(of: piExecutablePath) { _, value in PiExecutablePreference.path = value }
+                HStack {
+                    piExecutableStatus
+                    Spacer()
+                    Button("Choose…") { choosePiExecutable() }
+                    Button("Clear") { piExecutablePath = "" }
+                        .disabled(piExecutablePath.isEmpty)
+                }
+                Text("Changes apply to sessions started afterward. Running sessions keep their current pi process.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Extension status items") {
                 if model.extensionStatusKeys.isEmpty {
-                    Text("No extension status items are available.")
+                    Text("Status items appear here after an extension in a loaded session reports one.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(model.extensionStatusKeys, id: \.self) { key in
@@ -102,10 +130,70 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding(12)
         .task {
+            await refreshNotificationStatus()
             _ = await PiEnvironment.mergedAsync()
             detectedPiPath = PiPaths.detectedPiExecutable.path
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshNotificationStatus() }
+        }
+    }
+
+    private var textSizePercent: Int {
+        Int((TextSizePreference.steps[model.textSizeStep] * 100).rounded())
+    }
+
+    private var textSizeBinding: Binding<Double> {
+        Binding {
+            Double(model.textSizeStep)
+        } set: { value in
+            let step = Int(value.rounded())
+            if step != model.textSizeStep { model.textSizeStep = step }
+        }
+    }
+
+    private var detectedPiPathLabel: String {
+        detectedPiPath == "/usr/bin/env" ? "pi not found on PATH" : detectedPiPath
+    }
+
+    @ViewBuilder
+    private var piExecutableStatus: some View {
+        if let path = piExecutablePath.nonEmptyTrimmed {
+            if FileManager.default.isExecutableFile(atPath: (path as NSString).expandingTildeInPath) {
+                Label("Executable found", systemImage: "checkmark.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Label("Not found or not executable", systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
+        } else {
+            Label("Using auto-detected pi", systemImage: "magnifyingglass")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func refreshNotificationStatus() async {
+        let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        notificationsDenied = status == .denied
+    }
+
+    private func choosePiExecutable() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.treatsFilePackagesAsDirectories = true
+        panel.showsHiddenFiles = true
+        let current = piExecutablePath.nonEmptyTrimmed.map { ($0 as NSString).expandingTildeInPath } ?? detectedPiPath
+        panel.directoryURL = URL(fileURLWithPath: current).deletingLastPathComponent()
+        panel.prompt = "Choose"
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                piExecutablePath = url.path
+            }
         }
     }
 

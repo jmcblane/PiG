@@ -32,21 +32,16 @@ struct ModelsSettingsView: View {
                         loadState: model.modelCatalogLoadState,
                         retry: model.reloadModelCatalog,
                         allowsEmptySelection: true,
-                        emptyLabel: "Pi default"
+                        emptyLabel: "Pi default",
+                        clearLabel: "Use pi default"
                     )
                 } else {
                     LabeledContent("Work days") {
-                        Menu(workDaysSummary) {
+                        HStack(spacing: 4) {
                             ForEach(weekdays, id: \.0) { day, name in
-                                Button {
-                                    if model.scheduledWorkWeekdays.contains(day) {
-                                        model.scheduledWorkWeekdays.remove(day)
-                                    } else {
-                                        model.scheduledWorkWeekdays.insert(day)
-                                    }
-                                } label: {
-                                    Label(name, systemImage: model.scheduledWorkWeekdays.contains(day) ? "checkmark" : "")
-                                }
+                                Toggle(name, isOn: weekdayBinding(day))
+                                    .toggleStyle(.button)
+                                    .controlSize(.small)
                             }
                         }
                     }
@@ -63,7 +58,8 @@ struct ModelsSettingsView: View {
                         loadState: model.modelCatalogLoadState,
                         retry: model.reloadModelCatalog,
                         allowsEmptySelection: true,
-                        emptyLabel: "Pi default"
+                        emptyLabel: "Pi default",
+                        clearLabel: "Use pi default"
                     )
                     ModelSelectionControl(
                         title: "Off-hours model",
@@ -72,7 +68,8 @@ struct ModelsSettingsView: View {
                         loadState: model.modelCatalogLoadState,
                         retry: model.reloadModelCatalog,
                         allowsEmptySelection: true,
-                        emptyLabel: "Pi default"
+                        emptyLabel: "Pi default",
+                        clearLabel: "Use pi default"
                     )
 
                     if !DefaultModelSchedule.isValid {
@@ -107,60 +104,74 @@ struct ModelsSettingsView: View {
             Section("Session Naming") {
                 Toggle("Automatically name new sessions", isOn: $model.automaticSessionNamingEnabled)
 
-                Picker("Naming model", selection: $model.sessionNamingModelMode) {
-                    ForEach(SessionNamingModelMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                Group {
+                    Picker("Naming model", selection: $model.sessionNamingModelMode) {
+                        ForEach(SessionNamingModelMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+
+                    if model.sessionNamingModelMode == .specific {
+                        ModelSelectionControl(
+                            title: "Specific model",
+                            selection: $model.sessionNamingModelID,
+                            models: model.sessionNamingModels,
+                            loadState: model.modelCatalogLoadState,
+                            retry: model.reloadModelCatalog
+                        )
+                    }
+
+                    if model.sessionNamingModelMode == .apple {
+                        let status = AppleIntelligenceNaming.status
+                        Label(status.message, systemImage: status.isReady ? "checkmark.circle" : "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(status.isReady ? Color.secondary : Color.orange)
+                    } else {
+                        Picker("Naming thinking", selection: $model.sessionNamingThinkingLevel) {
+                            ForEach(SessionController.thinkingLevels, id: \.self) { level in
+                                Text(level.capitalized).tag(level)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Extensions for title generation")
+                            TextEditor(text: $titleExtensions)
+                                .font(.system(.callout, design: .monospaced))
+                                .frame(height: 72)
+                                .border(.separator)
+                            Text("One path per line. Loaded into the pi process that generates titles.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            ForEach(missingTitleExtensionPaths, id: \.self) { path in
+                                Label("Not found, will be skipped: \(path)", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
                     }
                 }
                 .disabled(!model.automaticSessionNamingEnabled)
-
-                if model.sessionNamingModelMode == .specific {
-                    ModelSelectionControl(
-                        title: "Specific model",
-                        selection: $model.sessionNamingModelID,
-                        models: model.sessionNamingModels,
-                        loadState: model.modelCatalogLoadState,
-                        retry: model.reloadModelCatalog
-                    )
-                    .disabled(!model.automaticSessionNamingEnabled)
-                    if model.sessionNamingModelID.isEmpty {
-                        Label("Choose a model for automatic naming.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                }
-
-                if model.sessionNamingModelMode == .apple {
-                    let status = AppleIntelligenceNaming.status
-                    Label(status.message, systemImage: status.isReady ? "checkmark.circle" : "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(status.isReady ? Color.secondary : Color.orange)
-                }
-
-                if model.sessionNamingModelMode != .apple {
-                    Picker("Naming thinking", selection: $model.sessionNamingThinkingLevel) {
-                        ForEach(SessionController.thinkingLevels, id: \.self) { level in
-                            Text(level.capitalized).tag(level)
-                        }
-                    }
-                    .disabled(!model.automaticSessionNamingEnabled)
-                }
-
-                LabeledContent("Extensions for title generation") {
-                    TextEditor(text: $titleExtensions)
-                        .font(.system(.callout, design: .monospaced))
-                        .frame(height: 72)
-                        .border(.separator)
-                }
-                Text("One path per line.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .padding(12)
-        .frame(width: 560)
-        .frame(minHeight: 620)
+    }
+
+    private var missingTitleExtensionPaths: [String] {
+        titleExtensions
+            .components(separatedBy: .newlines)
+            .compactMap(\.nonEmptyTrimmed)
+            .filter { !FileManager.default.fileExists(atPath: ($0 as NSString).expandingTildeInPath) }
+    }
+
+    private func weekdayBinding(_ day: Int) -> Binding<Bool> {
+        Binding {
+            model.scheduledWorkWeekdays.contains(day)
+        } set: { isOn in
+            if isOn { model.scheduledWorkWeekdays.insert(day) }
+            else { model.scheduledWorkWeekdays.remove(day) }
+        }
     }
 
     private func quickModelBinding(_ slot: Int) -> Binding<String> {
@@ -171,11 +182,6 @@ struct ModelsSettingsView: View {
         case 4: return $quickModel4
         default: return $quickModel5
         }
-    }
-
-    private var workDaysSummary: String {
-        let names = weekdays.compactMap { model.scheduledWorkWeekdays.contains($0.0) ? $0.1 : nil }
-        return names.isEmpty ? "None" : names.joined(separator: ", ")
     }
 
     private func minutesBinding(_ source: Binding<Int>) -> Binding<Date> {
@@ -249,7 +255,8 @@ private struct TimeZoneSelectionControl: View {
             isPresented = false
         } label: {
             HStack {
-                Image(systemName: selection == identifier ? "checkmark" : "")
+                Image(systemName: "checkmark")
+                    .opacity(selection == identifier ? 1 : 0)
                     .frame(width: 14)
                 Text(title)
                 Spacer(minLength: 0)
@@ -282,6 +289,7 @@ private struct ModelSelectionControl: View {
     let retry: () -> Void
     var allowsEmptySelection = false
     var emptyLabel = "None"
+    var clearLabel = "Clear shortcut"
 
     @State private var isPresented = false
     @State private var query = ""
@@ -323,10 +331,10 @@ private struct ModelSelectionControl: View {
             }
 
             if selection.isEmpty && !allowsEmptySelection {
-                Label("Choose a model before using this default.", systemImage: "exclamationmark.triangle.fill")
+                Label("Choose a model.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
-            } else if selectedModel == nil && loadState != .loading {
+            } else if !selection.isEmpty && selectedModel == nil && loadState != .loading {
                 Label("Saved model is unavailable. It will not be replaced automatically.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
@@ -343,7 +351,7 @@ private struct ModelSelectionControl: View {
             Divider()
 
             if allowsEmptySelection && !selection.isEmpty {
-                Button(emptyLabel == "None" ? "Clear shortcut" : "Use pi default") {
+                Button(clearLabel) {
                     selection = ""
                     isPresented = false
                 }
@@ -421,7 +429,8 @@ private struct ModelSelectionControl: View {
                 isPresented = false
             } label: {
                 HStack {
-                    Image(systemName: selection == model.id ? "checkmark" : "")
+                    Image(systemName: "checkmark")
+                        .opacity(selection == model.id ? 1 : 0)
                         .frame(width: 14)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(model.name).foregroundStyle(.primary)
@@ -444,6 +453,7 @@ private struct ModelSelectionControl: View {
             }
             .buttonStyle(.plain)
             .help(pinnedIDs.contains(model.id) ? "Unpin" : "Pin to top")
+            .accessibilityLabel(pinnedIDs.contains(model.id) ? "Unpin \(model.name)" : "Pin \(model.name)")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)

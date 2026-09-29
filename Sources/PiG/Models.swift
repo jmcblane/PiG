@@ -375,6 +375,15 @@ enum SessionRuntimePolicy: String, CaseIterable, Identifiable {
         }
     }
 
+    var helpText: String {
+        switch self {
+        case .hybrid:
+            return "Idle sessions unload after 30 minutes, and at most 3 idle sessions stay loaded. The selected session, quick chats, and busy sessions are never unloaded."
+        case .manual:
+            return "Sessions stay loaded until you unload them from the View menu."
+        }
+    }
+
     private static let key = "PiG.sessionRuntimePolicy"
 
     static var stored: SessionRuntimePolicy {
