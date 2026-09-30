@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Failed message · Retry mockup</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 40px 20px; background: #171819; color: #e8e6df; font: 14px system-ui, sans-serif; }
+  main { max-width: 620px; margin: auto; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  .hint { color: #aaa9a2; font-size: 13px; line-height: 1.5; }
+  .demo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 20px 0; }
+  select, button, textarea { font: inherit; }
+  select, button { color: inherit; background: #303235; border: 1px solid #505155; border-radius: 7px; padding: 7px 11px; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #d1ad69; outline-offset: 3px; }
+  .chat { border: 1px solid #3b3c3d; border-radius: 12px; padding: 18px; background: #202223; }
+  #transcript { min-height: 100px; padding-bottom: 20px; }
+  .message { background: #2a2d2f; padding: 12px; border-radius: 8px; margin-bottom: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .message small { display: block; color: #aaa9a2; margin-bottom: 6px; }
+  #failure { border: 1px solid #986c53; background: #342923; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  #failure[hidden], #attachment[hidden] { display: none; }
+  #failure-title { color: #efb89c; font-weight: 600; }
+  #saved-preview { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 8px; }
+  .primary { background: #c5a36b; color: #191919; border-color: #c5a36b; font-weight: 600; }
+  textarea { width: 100%; resize: vertical; min-height: 85px; border: 1px solid #4a4c4d; border-radius: 8px; background: #191b1c; color: inherit; padding: 12px; }
+  .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+  #attachment { font-size: 12px; border: 1px solid #505155; border-radius: 6px; padding: 5px 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Failed-send retry</h1>
+  <p class="hint">Edit the draft after a failed send, then retry. Retry sends the saved message, not your new draft.</p>
+  <div class="demo">
+    <label for="outcome">Retry result</label>
+    <select id="outcome">
+      <option value="success">Success</option>
+      <option value="failure">Fails again</option>
+      <option value="unknown">Delivery unknown</option>
+    </select>
+    <button id="reset">Reset demo</button>
+  </div>
+  <section class="chat" aria-label="Chat mockup">
+    <div id="transcript"><p class="hint">No messages sent yet.</p></div>
+    <section id="failure" aria-label="Failed submission">
+      <div id="failure-title" role="status" aria-live="polite">Message not sent</div>
+      <div id="saved-preview"></div>
+      <div class="actions">
+        <button id="retry" class="primary">Retry</button>
+        <button id="dismiss">Dismiss</button>
+      </div>
+    </section>
+    <label for="draft" class="hint">Draft</label>
+    <textarea id="draft"></textarea>
+    <div class="composer-footer">
+      <span id="attachment">📎 screenshot.png</span>
+      <button id="send" class="primary">Send</button>
+    </div>
+  </section>
+  <p class="hint">Demo only: no network requests. Send simulates an initial failure; Retry uses the selected result. The attachment is a placeholder.</p>
+</main>
+<script>
+  const el = id => document.getElementById(id);
+  let saved, busy = false, hasAttachment = true, generation = 0;
+  const initialText = 'Please review this screenshot.';
+
+  function showFailure() {
+    el('failure').hidden = false;
+    el('failure-title').textContent = 'Message not sent';
+    el('saved-preview').textContent = saved.text + (saved.image ? '\n📎 screenshot.png' : '');
+    el('retry').textContent = 'Retry';
+  }
+  function setBusy(value, label = 'Retrying…') {
+    busy = value;
+    ['retry', 'dismiss', 'send', 'outcome'].forEach(id => el(id).disabled = value);
+    if (value) el('retry').textContent = label;
+  }
+  function reset() {
+    generation++;
+    setBusy(false);
+    saved = { text: initialText, image: true };
+    hasAttachment = true;
+    el('draft').value = initialText;
+    el('attachment').hidden = false;
+    el('transcript').innerHTML = '<p class="hint">No messages sent yet.</p>';
+    showFailure();
+  }
+  async function retry() {
+    if (busy || !saved) return;
+    const token = generation;
+    const submission = { ...saved };
+    const outcome = el('outcome').value;
+    setBusy(true);
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    if (token !== generation) return;
+    setBusy(false);
+    if (outcome === 'failure') {
+      showFailure();
+      return;
+    }
+    const row = document.createElement('div');
+    row.className = 'message';
+    const label = document.createElement('small');
+    label.textContent = 'You · Sent';
+    row.append(label, document.createTextNode(submission.text + (submission.image ? '\n📎 screenshot.png' : '')));
+    if (!el('transcript').querySelector('.message')) el('transcript').replaceChildren();
+    el('transcript').append(row);
+    if (el('draft').value === submission.text) el('draft').value = '';
+    if (submission.image) { hasAttachment = false; el('attachment').hidden = true; }
+    saved = null;
+    el('failure').hidden = true;
+    el('draft').focus();
+  }
+  el('retry').onclick = () => retry();
+  el('dismiss').onclick = () => {
+    saved = null;
+    el('failure').hidden = true;
+    el('draft').focus();
+  };
+  el('send').onclick = () => {
+    if (busy || (!el('draft').value.trim() && !hasAttachment)) return;
+    saved = { text: el('draft').value, image: hasAttachment };
+    showFailure();
+  };
+  el('reset').onclick = reset;
+  reset();
+</script>
+</body>
+</html>
