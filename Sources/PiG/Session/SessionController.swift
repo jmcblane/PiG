@@ -35,7 +35,12 @@ final class SessionController: ObservableObject, Identifiable {
     let projectPath: String
     let kind: SessionKind
     @Published var sessionPath: String? {
-        didSet { if sessionPath != oldValue { recoveryRevision &+= 1 } }
+        didSet {
+            if sessionPath != oldValue {
+                recoveryRevision &+= 1
+                failedPrompt = nil
+            }
+        }
     }
     @Published var title: String
     @Published var messages: [ChatMessage] {
@@ -83,6 +88,40 @@ final class SessionController: ObservableObject, Identifiable {
     @Published var messageScrollRequest: MessageScrollRequest?
     @Published var visibleMessageLimit = 60
     @Published var lastRuntimeUse = Date()
+
+    struct FailedPromptSubmission {
+        let id = UUID()
+        var text: String
+        var displayText: String
+        var images: [ImageAttachment]
+        var requestFollowUp: Bool
+        var forceQueue: Bool
+        var composerDraft: String?
+    }
+
+    @Published private(set) var failedPrompt: FailedPromptSubmission?
+    @Published private(set) var isSendingPrompt = false
+
+    func preserveFailedPromptDraft(_ draft: String) {
+        failedPrompt?.composerDraft = draft
+    }
+
+    func dismissFailedPrompt() {
+        guard !isSendingPrompt else { return }
+        failedPrompt = nil
+    }
+
+    func retryFailedPrompt() async -> Bool {
+        guard let submission = failedPrompt, !isSendingPrompt, !quickChatClosed else { return false }
+        resumeRuntimeLoading()
+        return await sendPrompt(
+            submission.text,
+            images: submission.images,
+            requestFollowUp: submission.requestFollowUp,
+            forceQueue: submission.forceQueue,
+            composerDraft: submission.composerDraft
+        )
+    }
 
     private struct QueuedImageSubmission {
         var composerText: String
@@ -515,16 +554,20 @@ final class SessionController: ObservableObject, Identifiable {
         _ rawText: String,
         images: [ImageAttachment] = [],
         requestFollowUp: Bool = false,
-        forceQueue: Bool = false
+        forceQueue: Bool = false,
+        composerDraft: String? = nil
     ) async -> Bool {
         let text = rawText.nonEmptyTrimmed ?? ""
-        guard !text.isEmpty || !images.isEmpty else { return false }
+        guard !isSendingPrompt, !text.isEmpty || !images.isEmpty else { return false }
+        isSendingPrompt = true
+        defer { isSendingPrompt = false }
         let isQueueing = forceQueue || showsActivityIndicator
         let prepared = PromptEnvelope.prepare(canonicalText: text, projectPath: projectPath)
         errorText = nil
         isAgentSettled = false
         bottomScrollRequest += 1
         var optimisticMessageID: String?
+        var commandAttempted = false
         do {
             try await ensureRPC()
             let messageID = UUID().uuidString
@@ -557,8 +600,14 @@ final class SessionController: ObservableObject, Identifiable {
             }
             if !images.isEmpty { command["images"] = images.compactMap(\.rpcValue) }
             guard let rpc else { throw PiRPCClient.RPCError.notRunning }
-            _ = try await rpc.command(command)
-            if isQueueing, !images.isEmpty {
+            commandAttempted = true
+            let response = try await rpc.command(command)
+            failedPrompt = nil
+            // An extension command or input handler consumed the input: no run
+            // starts, so agent_settled never arrives.
+            let handled = (response["data"] as? [String: Any])?["disposition"] as? String == "handled"
+            if handled, !showsActivityIndicator { isAgentSettled = true }
+            if isQueueing, !images.isEmpty, !handled {
                 queuedImageSubmissions.append(QueuedImageSubmission(composerText: text, images: images))
                 queuedImageCount = queuedImageSubmissions.reduce(0) { $0 + $1.images.count }
             }
@@ -569,10 +618,36 @@ final class SessionController: ObservableObject, Identifiable {
             await refreshState()
             return true
         } catch {
+            eventHandler(.log(error.localizedDescription))
+            // Once a write was attempted, a lost response or connection cannot
+            // prove non-delivery. Keep the optimistic message and never offer a
+            // resend that could duplicate it. An explicit rejection is different.
+            let wasRejected: Bool
+            if let rpcError = error as? PiRPCClient.RPCError, case .commandFailed = rpcError {
+                wasRejected = true
+            } else {
+                wasRejected = false
+            }
+            if commandAttempted && !wasRejected {
+                failedPrompt = nil
+                if isQueueing, !images.isEmpty {
+                    queuedImageSubmissions.append(QueuedImageSubmission(composerText: text, images: images))
+                    queuedImageCount = queuedImageSubmissions.reduce(0) { $0 + $1.images.count }
+                }
+                if rpc?.isRunning != true { isAgentSettled = true }
+                await refreshState()
+                return true
+            }
             if let optimisticMessageID { messages.removeAll { $0.id == optimisticMessageID } }
             isAgentSettled = true
-            errorText = error.localizedDescription
-            eventHandler(.log(error.localizedDescription))
+            failedPrompt = FailedPromptSubmission(
+                text: text,
+                displayText: prepared.displayText,
+                images: images,
+                requestFollowUp: requestFollowUp,
+                forceQueue: isQueueing,
+                composerDraft: composerDraft
+            )
             return false
         }
     }
@@ -1661,6 +1736,9 @@ final class SessionController: ObservableObject, Identifiable {
 
     func receiveRPCEvent(_ event: [String: Any]) {
         guard let type = event["type"] as? String else { return }
+        // Nested calls (e.g. from codemode scripts) are reported by their parent
+        // tool and never appear in the transcript.
+        if type.hasPrefix("tool_execution_"), event["parentToolCallId"] != nil { return }
         recoveryRevision &+= 1
         defer { updateRecoveryTimer() }
         switch type {

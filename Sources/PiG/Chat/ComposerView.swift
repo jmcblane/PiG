@@ -28,6 +28,9 @@ struct ComposerView: View {
         let files = displayedFileSuggestions
         let accentFocus = model.composerFocusAccent && isFocused
         VStack(spacing: 8) {
+            if let submission = controller.failedPrompt {
+                failedPromptPanel(submission)
+            }
             if !slash.isEmpty {
                 SlashCommandSuggestions(commands: slash, selectedIndex: min(suggestionIndex, slash.count - 1)) { command in
                     draft = command.insertionText
@@ -109,7 +112,7 @@ struct ComposerView: View {
                         }
                     }
                     .buttonStyle(SendButtonStyle(active: controller.canAbort))
-                    .disabled(isSubmitting || (!controller.canAbort && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && imageAttachments.isEmpty))
+                    .disabled(isSubmitting || controller.isSendingPrompt || (!controller.canAbort && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && imageAttachments.isEmpty))
                     .help(controller.canAbort ? "Abort" : "Send")
                 }
                 .padding(.horizontal, 12)
@@ -125,13 +128,6 @@ struct ComposerView: View {
                     .stroke(accentFocus ? appTheme.brass.opacity(0.55) : appTheme.line, lineWidth: 1)
             )
             .shadow(color: accentFocus ? appTheme.brass.opacity(0.12) : .clear, radius: accentFocus ? 8 : 0, y: 0)
-            if showsLandingResources && !controller.chatResources.isEmpty {
-                Text("Added resources apply only to this chat. Your defaults stay the same.")
-                    .font(AppFonts.ui(11))
-                    .foregroundStyle(appTheme.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
@@ -278,8 +274,57 @@ struct ComposerView: View {
         )
     }
 
+    private func failedPromptPanel(_ submission: SessionController.FailedPromptSubmission) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Message not sent")
+                .font(AppFonts.ui(13, weight: .semibold))
+                .foregroundStyle(appTheme.danger)
+            if !submission.displayText.isEmpty {
+                Text(submission.displayText)
+                    .font(AppFonts.ui(13))
+                    .foregroundStyle(appTheme.text)
+                    .lineLimit(3)
+            }
+            ForEach(submission.images) { image in
+                Label(image.name, systemImage: "photo")
+                    .font(AppFonts.ui(12))
+                    .foregroundStyle(appTheme.muted)
+            }
+            HStack(spacing: 12) {
+                Button(controller.isSendingPrompt ? "Retrying…" : "Retry") {
+                    retryFailedPrompt(submission)
+                }
+                .foregroundStyle(appTheme.brass)
+                Button("Dismiss") { controller.dismissFailedPrompt() }
+                    .foregroundStyle(appTheme.muted)
+            }
+            .buttonStyle(.plain)
+            .font(AppFonts.ui(13, weight: .semibold))
+            .disabled(isSubmitting || controller.isSendingPrompt)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(appTheme.danger.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(appTheme.danger.opacity(0.35), lineWidth: 1))
+    }
+
+    private func retryFailedPrompt(_ submission: SessionController.FailedPromptSubmission) {
+        guard !isSubmitting, !controller.isSendingPrompt else { return }
+        isSubmitting = true
+        Task {
+            let accepted = await controller.retryFailedPrompt()
+            isSubmitting = false
+            guard accepted else { return }
+            beforeSubmit?()
+            if let submittedDraft = submission.composerDraft, draft == submittedDraft { draft = "" }
+            let submittedIDs = Set(submission.images.map(\.id))
+            imageAttachments.removeAll { submittedIDs.contains($0.id) }
+            entryHeight = max(36, AppFonts.scaled(15.5) + 20)
+        }
+    }
+
     private func submit(requestFollowUp: Bool = false) {
-        guard !isSubmitting else { return }
+        guard !isSubmitting, !controller.isSendingPrompt else { return }
         let normalized = ComposerTokenCodec.normalizeExactReferences(
             in: draft + " ",
             skills: allSlashCommands,
@@ -288,12 +333,18 @@ struct ComposerView: View {
         guard !normalized.isEmpty || !imageAttachments.isEmpty else { return }
         let submittedDraft = draft
         let submittedImages = imageAttachments
+        let previousFailureID = controller.failedPrompt?.id
         controller.resumeRuntimeLoading()
         isSubmitting = true
         Task {
             let accepted = await controller.send(normalized, images: submittedImages, requestFollowUp: requestFollowUp)
             isSubmitting = false
-            guard accepted else { return }
+            guard accepted else {
+                if controller.failedPrompt?.id != previousFailureID {
+                    controller.preserveFailedPromptDraft(submittedDraft)
+                }
+                return
+            }
             beforeSubmit?()
             if draft == submittedDraft { draft = "" }
             let submittedIDs = Set(submittedImages.map(\.id))
