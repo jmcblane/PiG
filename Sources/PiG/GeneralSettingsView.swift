@@ -9,6 +9,7 @@ struct GeneralSettingsView: View {
     @State private var notificationsDenied = false
     @AppStorage(QuickChatsFolderPreference.key) private var quickChatsFolder = ""
     @AppStorage(TerminalPaneMode.buttonDefaultKey) private var terminalButtonMode = TerminalPaneMode.full
+    @AppStorage(OpenInTerminalTarget.key) private var openInTerminalTarget = OpenInTerminalTarget.pig
 
     var body: some View {
         Form {
@@ -56,6 +57,11 @@ struct GeneralSettingsView: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
+                Picker("Open in Terminal uses", selection: $openInTerminalTarget) {
+                    ForEach(OpenInTerminalTarget.allCases) { target in
+                        Text(target.displayName).tag(target)
+                    }
+                }
             }
 
             Section("Quick Chats") {
@@ -77,7 +83,7 @@ struct GeneralSettingsView: View {
                 }
             }
 
-            Section {
+            Section("Notifications") {
                 Toggle("Enable notifications", isOn: $model.notificationsEnabled)
                 if notificationsDenied {
                     HStack {
@@ -96,12 +102,6 @@ struct GeneralSettingsView: View {
                     model.scheduleTestNotification()
                 }
                 .disabled(!model.notificationsEnabled)
-            } header: {
-                Text("Notifications")
-            } footer: {
-                Text("The delay gives you time to switch to another app before the test notification arrives.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
 
             Section("Pi executable") {
@@ -114,9 +114,6 @@ struct GeneralSettingsView: View {
                     Button("Clear") { piExecutablePath = "" }
                         .disabled(piExecutablePath.isEmpty)
                 }
-                Text("Changes apply to sessions started afterward. Running sessions keep their current pi process.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
 
             Section("Extension status items") {

@@ -4,6 +4,8 @@ import ImageIO
 
 extension Notification.Name {
     static let pigToggleTerminal = Notification.Name("pigToggleTerminal")
+    /// Opens a new terminal tab; the notification's object is the directory path.
+    static let pigOpenTerminalAtPath = Notification.Name("pigOpenTerminalAtPath")
     static let pigToggleFullscreenTerminal = Notification.Name("pigToggleFullscreenTerminal")
     static let pigOpenVerticalTerminalSplit = Notification.Name("pigOpenVerticalTerminalSplit")
     static let pigOpenHorizontalTerminalSplit = Notification.Name("pigOpenHorizontalTerminalSplit")
@@ -77,6 +79,13 @@ struct ChatPaneView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .pigToggleTerminal)) { _ in
             toggleTerminal()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pigOpenTerminalAtPath)) { notification in
+            guard let path = notification.object as? String else { return }
+            terminalWorkspace.addTab(workingDirectoryPath: path)
+            if !terminalWorkspace.mode.terminalVisible {
+                terminalWorkspace.mode = TerminalPaneMode.buttonDefault
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pigToggleFullscreenTerminal)) { _ in
             toggleFullscreenTerminal()

@@ -99,6 +99,27 @@ enum TerminalPaneMode: String, Equatable {
     }
 }
 
+/// Where the file tree's "Open in Terminal" opens a folder (Settings → General → Terminal).
+enum OpenInTerminalTarget: String, CaseIterable, Identifiable {
+    case pig
+    case system
+
+    static let key = "PiG.terminal.openInTerminalTarget"
+
+    static var current: OpenInTerminalTarget {
+        OpenInTerminalTarget(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .pig
+    }
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .pig: return "Inside PiG"
+        case .system: return "Default terminal app"
+        }
+    }
+}
+
 enum TerminalSplitAxis {
     case vertical
     case horizontal

@@ -820,10 +820,16 @@ private struct FileTreeRowView: View {
 
     private func openInTerminal() {
         let dir = containingDirectory
-        let ghostty = URL(fileURLWithPath: "/Applications/Ghostty.app")
-        let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
-        let app = FileManager.default.fileExists(atPath: ghostty.path) ? ghostty : terminal
-        NSWorkspace.shared.open([dir], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+        switch OpenInTerminalTarget.current {
+        case .pig:
+            NotificationCenter.default.post(name: .pigOpenTerminalAtPath, object: dir.path)
+        case .system:
+            // macOS has no default-terminal setting; the app that opens shell
+            // executables is the closest equivalent (Terminal unless changed).
+            let app = NSWorkspace.shared.urlForApplication(toOpen: .unixExecutable)
+                ?? URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+            NSWorkspace.shared.open([dir], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+        }
     }
 
     private func copyToClipboard(_ text: String) {
