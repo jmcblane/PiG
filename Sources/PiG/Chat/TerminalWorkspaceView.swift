@@ -188,12 +188,12 @@ struct TerminalWorkspaceView: View {
                 ForEach(tabs) { tab in
                     EmbeddedTerminalView(
                         workingDirectoryPath: tab.workingDirectoryPath,
+                        isActive: tab.id == activeTabID,
                         onExit: { onExit(tab.id) },
                         onTitleChange: { onTitleChange(tab.id, $0) }
                     )
                     .id(tab.id)
-                    .opacity(tab.id == activeTabID ? 1 : 0)
-                    .allowsHitTesting(tab.id == activeTabID)
+                    .zIndex(tab.id == activeTabID ? 1 : 0)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -231,6 +231,7 @@ private struct TerminalTabStrip: View {
                             .padding(.leading, 10)
                             .padding(.trailing, 6)
                             .frame(maxWidth: 110, minHeight: 24, maxHeight: 24, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help(tab.workingDirectoryPath ?? "~")
@@ -239,6 +240,7 @@ private struct TerminalTabStrip: View {
                         Image(systemName: "xmark")
                             .font(AppFonts.ui(9, weight: .bold))
                             .frame(width: 20, height: 24)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(appTheme.muted)
@@ -258,6 +260,7 @@ private struct TerminalTabStrip: View {
                 Image(systemName: "plus")
                     .font(AppFonts.ui(11, weight: .bold))
                     .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(appTheme.secondaryText)

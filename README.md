@@ -1,8 +1,12 @@
 # PiG
 
 <p>
-  <img src="images/pig-main-window.png" alt="PiG main window" width="49%">
-  <img src="images/pig-chat-session.png" alt="PiG chat session" width="49%">
+  <img src="images/pig-main-window.png" alt="PiG project home and recent sessions" width="49%">
+  <img src="images/pig-chat-session.png" alt="PiG chat session with tool activity" width="49%">
+</p>
+<p>
+  <img src="images/pig-split-terminal.png" alt="PiG chat with split terminal" width="49%">
+  <img src="images/pig-fullscreen-terminal.png" alt="PiG fullscreen terminal" width="49%">
 </p>
 
 PiG is a SwiftUI macOS GUI for the `pi` coding agent.

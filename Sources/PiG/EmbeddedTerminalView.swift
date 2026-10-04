@@ -6,6 +6,7 @@ import SwiftTerm
 struct EmbeddedTerminalView: NSViewRepresentable {
     @Environment(\.appTheme) private var appTheme
     let workingDirectoryPath: String?
+    let isActive: Bool
     let onExit: () -> Void
     let onTitleChange: (String) -> Void
 
@@ -17,6 +18,7 @@ struct EmbeddedTerminalView: NSViewRepresentable {
         let view = ShellTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         view.processDelegate = context.coordinator
         view.optionAsMetaKey = false
+        view.isHidden = !isActive
         applyTheme(to: view)
         view.startShell(workingDirectoryPath: workingDirectoryPath)
         return view
@@ -26,6 +28,20 @@ struct EmbeddedTerminalView: NSViewRepresentable {
         context.coordinator.onExit = onExit
         context.coordinator.onTitleChange = onTitleChange
         applyTheme(to: view)
+        setActive(isActive, view: view)
+    }
+
+    /// Tabs are stacked AppKit views. SwiftUI's opacity and hit-testing
+    /// modifiers don't stop an NSView from taking clicks and keystrokes,
+    /// so inactive tabs are hidden in AppKit and focus follows the active tab.
+    private func setActive(_ active: Bool, view: ShellTerminalView) {
+        guard view.isHidden == active else { return }
+        view.isHidden = !active
+        if active {
+            DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+        } else if view.window?.firstResponder === view {
+            view.window?.makeFirstResponder(nil)
+        }
     }
 
     static func dismantleNSView(_ view: ShellTerminalView, coordinator: Coordinator) {
@@ -91,7 +107,7 @@ final class ShellTerminalView: LocalProcessTerminalView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        window?.makeFirstResponder(self)
+        if !isHidden { window?.makeFirstResponder(self) }
     }
 
     private static func resolvedDirectory(_ path: String?) -> String {
