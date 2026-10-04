@@ -7,9 +7,13 @@ let package = Package(
     products: [
         .executable(name: "PiG", targets: ["PiG"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0")
+    ],
     targets: [
         .executableTarget(
             name: "PiG",
+            dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")],
             path: "Sources/PiG",
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"])

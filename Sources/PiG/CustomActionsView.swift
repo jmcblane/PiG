@@ -104,6 +104,7 @@ private struct ThemedTitlebarRightControls: View {
 
     var body: some View {
         HStack(spacing: 5) {
+            TitlebarTerminalButton()
             SessionTreeToolbarButton()
             CustomActionsToolbarButton()
         }
@@ -164,6 +165,42 @@ private struct TitlebarIconButtonStyle: ButtonStyle {
             .frame(width: 24, height: 20)
             .background(configuration.isPressed ? appTheme.panel2.opacity(0.9) : Color.clear)
             .contentShape(Rectangle())
+    }
+}
+
+private struct TitlebarTerminalButton: View {
+    @State private var isSplitActive = false
+
+    var body: some View {
+        Button {
+            NotificationCenter.default.post(name: .pigToggleTerminal, object: nil)
+        } label: {
+            Image(systemName: "terminal")
+        }
+        .buttonStyle(TitlebarIconButtonStyle())
+        .help("Toggle terminal — right-click for terminal actions")
+        .contextMenu {
+            Button("Show Fullscreen Terminal") {
+                NotificationCenter.default.post(name: .pigShowTerminal, object: nil)
+            }
+            Button("Open Vertical Split") {
+                NotificationCenter.default.post(name: .pigShowVerticalTerminalSplit, object: nil)
+            }
+            Button("Open Horizontal Split") {
+                NotificationCenter.default.post(name: .pigShowHorizontalTerminalSplit, object: nil)
+            }
+            Button("New Terminal Tab") {
+                NotificationCenter.default.post(name: .pigNewTerminalTab, object: nil)
+            }
+            Divider()
+            Button("Close Split") {
+                NotificationCenter.default.post(name: .pigCloseTerminalSplit, object: nil)
+            }
+            .disabled(!isSplitActive)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pigTerminalSplitActiveChanged)) { notification in
+            isSplitActive = (notification.object as? Bool) ?? false
+        }
     }
 }
 

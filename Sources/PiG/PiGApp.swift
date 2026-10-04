@@ -58,6 +58,18 @@ struct PiGApp: App {
                     NotificationCenter.default.post(name: .pigRevealSidebarSearch, object: nil)
                 }
                 .keyboardShortcut("f", modifiers: .command)
+                Button("Toggle Fullscreen Terminal") {
+                    NotificationCenter.default.post(name: .pigToggleFullscreenTerminal, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                Button("Open Vertical Terminal Split") {
+                    NotificationCenter.default.post(name: .pigOpenVerticalTerminalSplit, object: nil)
+                }
+                .keyboardShortcut("d", modifiers: .command)
+                Button("Open Horizontal Terminal Split") {
+                    NotificationCenter.default.post(name: .pigOpenHorizontalTerminalSplit, object: nil)
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
                 Divider()
                 ForEach(Array(quickModels.enumerated()), id: \.offset) { slot, id in
                     Button("Quick Model \(slot + 1)") {

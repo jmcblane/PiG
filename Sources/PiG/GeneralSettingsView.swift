@@ -8,6 +8,7 @@ struct GeneralSettingsView: View {
     @State private var detectedPiPath = PiPaths.detectedPiExecutable.path
     @State private var notificationsDenied = false
     @AppStorage(QuickChatsFolderPreference.key) private var quickChatsFolder = ""
+    @AppStorage(TerminalPaneMode.buttonDefaultKey) private var terminalButtonMode = TerminalPaneMode.full
 
     var body: some View {
         Form {
@@ -47,6 +48,14 @@ struct GeneralSettingsView: View {
 
                 Toggle("Show thinking traces", isOn: $model.showThinkingTraces)
                 Toggle("Accent composer on focus", isOn: $model.composerFocusAccent)
+            }
+
+            Section("Terminal") {
+                Picker("Terminal button opens", selection: $terminalButtonMode) {
+                    ForEach(TerminalPaneMode.buttonChoices, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
             }
 
             Section("Quick Chats") {

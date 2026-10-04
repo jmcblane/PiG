@@ -54,6 +54,7 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 
 - File tree: create, rename and trash files; reveal in Finder; open in Terminal; copy paths and references
 - Custom actions: a button in the title bar that runs your saved shell commands for the project, with output shown in the chat
+- Built-in terminal ([SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)): fullscreen (⌘⇧F), vertical split (⌘D) or horizontal split (⌘⇧D), with tabs; opens in the session's project folder
 
 ### Appearance
 
@@ -77,3 +78,5 @@ open dist/PiG.app
 PiG stores its data in `~/Library/Application Support/PiG` and reads pi's agent directory (`~/.pi/agent`, or `PI_CODING_AGENT_DIR` if set). If PiG can't find `pi`, set its path in Settings → General.
 
 Optional usage-limit meters read OAuth credentials from pi's `auth.json` and query provider usage endpoints (ChatGPT/Codex and xAI), or run the `claude` CLI. Meters appear only when a matching credential exists.
+
+Third-party licenses are in `THIRD_PARTY_NOTICES.md`.
