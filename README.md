@@ -42,6 +42,8 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 
 ### Inline HTML controls
 
+![Interactive color studio with live color swatches and a glow slider inside PiG chat](images/pig-inline-html.png)
+
 PiG loads a bundled `html_render` extension into its chat-session pi processes.
 It does not install anything in pi's agent directory or change standalone pi
 sessions.
