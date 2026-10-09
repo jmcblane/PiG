@@ -88,6 +88,14 @@ enum QuickChatsFolderPreference {
     }
 }
 
+enum HTMLRenderPreference {
+    static let key = "PiG.htmlRender.enabled"
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: key, default: true)
+    }
+}
+
 enum TitleGenerationExtensionsPreference {
     static let key = "PiG.sessionNaming.titleExtensions"
 

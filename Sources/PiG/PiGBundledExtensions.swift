@@ -4,6 +4,7 @@ import Foundation
 // pi's agent directory or added to its persistent settings.
 enum PiGBundledExtensions {
     static func addingTo(_ resources: PiLaunchResources) throws -> PiLaunchResources {
+        guard HTMLRenderPreference.isEnabled else { return resources }
         let extensionURL: URL
         if Bundle.main.bundleURL.pathExtension == "app" {
             guard let url = Bundle.main.url(forResource: "html-render", withExtension: "ts", subdirectory: "extensions") else {

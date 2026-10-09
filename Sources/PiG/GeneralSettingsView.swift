@@ -10,6 +10,7 @@ struct GeneralSettingsView: View {
     @AppStorage(QuickChatsFolderPreference.key) private var quickChatsFolder = ""
     @AppStorage(TerminalPaneMode.buttonDefaultKey) private var terminalButtonMode = TerminalPaneMode.full
     @AppStorage(OpenInTerminalTarget.key) private var openInTerminalTarget = OpenInTerminalTarget.pig
+    @AppStorage(HTMLRenderPreference.key) private var htmlRenderEnabled = true
 
     var body: some View {
         Form {
@@ -49,6 +50,10 @@ struct GeneralSettingsView: View {
 
                 Toggle("Show thinking traces", isOn: $model.showThinkingTraces)
                 Toggle("Accent composer on focus", isOn: $model.composerFocusAccent)
+                Toggle(isOn: $htmlRenderEnabled) {
+                    Text("Interactive HTML in replies")
+                    Text("Lets the agent add small interactive controls to chat. Applies to sessions started after you change it.")
+                }
             }
 
             Section("Terminal") {
