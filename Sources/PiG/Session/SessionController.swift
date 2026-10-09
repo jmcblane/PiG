@@ -550,6 +550,26 @@ final class SessionController: ObservableObject, Identifiable {
         return await sendPrompt(text, images: images, requestFollowUp: requestFollowUp)
     }
 
+    @discardableResult
+    func sendHTMLWidgetMessage(_ rawText: String) async -> Bool {
+        guard let text = rawText.nonEmptyTrimmed, text.utf16.count <= 2000,
+              !text.hasPrefix("/"), !text.hasPrefix("!") else { return false }
+        guard !quickChatClosed else {
+            errorText = closedQuickChatNotice
+            return false
+        }
+        guard !isSendingPrompt else {
+            errorText = "A message is already being sent. Try this control again in a moment."
+            return false
+        }
+        lastRuntimeUse = Date()
+        resumeRuntimeLoading()
+        // Only ordinary prompts: never route generated text through send(),
+        // which interprets !shell and /local commands. Queue as a follow-up
+        // rather than interrupting an active run with steering.
+        return await sendPrompt(text, requestFollowUp: true)
+    }
+
     private func sendPrompt(
         _ rawText: String,
         images: [ImageAttachment] = [],
@@ -1445,7 +1465,8 @@ final class SessionController: ObservableObject, Identifiable {
         let shouldApplyNewSessionDefaults = createdAsNewSession && sessionPath == nil && messages.isEmpty
         resetStreamingState()
         clearQueueState()
-        let client = PiRPCClient(projectPath: projectPath, noSession: isQuickChat, launchResources: launchResources)
+        let resources = try PiGBundledExtensions.addingTo(launchResources)
+        let client = PiRPCClient(projectPath: projectPath, noSession: isQuickChat, launchResources: resources)
         client.onEvent = { [weak self, weak client] event in
             guard let self, self.rpc === client else { return }
             self.receiveRPCEvent(event)

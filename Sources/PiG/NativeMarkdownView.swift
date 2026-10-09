@@ -179,6 +179,12 @@ enum MarkdownBlockParser {
             }
             if inCode { codeLines.append(line); continue }
 
+            if HTMLArtifact.reference(in: trimmed) != nil {
+                flushBlocks()
+                blocks.append(.paragraph(trimmed))
+                continue
+            }
+
             if trimmed.isEmpty {
                 flushParagraph(); flushQuote(); flushTable()
                 continue
@@ -442,7 +448,7 @@ private final class PreparedNativeMarkdown: @unchecked Sendable {
                         cacheable: cacheable || index != segments.count - 1 || cellIndex != cells.count - 1
                     )
                 }
-            case .code:
+            case .code, .htmlWidget:
                 break
             }
         }
@@ -504,6 +510,8 @@ struct NativeMarkdownView: View {
     var isStreaming = false
     var projectPath: String? = nil
     var textSizeStep: Int = TextSizePreference.step
+    var htmlArtifacts: [String: HTMLArtifact] = [:]
+    var onSendHTMLMessage: ((String) -> Void)? = nil
 
     // Preparation is synchronous. It used to hop to a background task and
     // render a 1pt placeholder until the result arrived, which collapsed the
@@ -541,6 +549,14 @@ struct NativeMarkdownView: View {
             }
         case .code(let code, let language):
             NativeCodeBlockView(code: code, language: language, theme: theme, textSizeStep: textSizeStep)
+        case .htmlWidget(let reference):
+            if role == .assistant, let artifact = htmlArtifacts[reference] {
+                HTMLArtifactView(artifact: artifact, theme: theme, textSizeStep: textSizeStep, onSendMessage: onSendHTMLMessage)
+            } else {
+                Text(role == .assistant ? "Interactive controls unavailable" : "[[pig-ui:\(reference)]]")
+                    .font(AppFonts.ui(13))
+                    .foregroundStyle(theme.palette.muted.color)
+            }
         case .table(let header, let rows):
             tableView(header: header, rows: rows, prepared: prepared, palette: palette)
         }

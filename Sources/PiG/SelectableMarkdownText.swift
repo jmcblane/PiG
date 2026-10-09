@@ -12,6 +12,7 @@ enum MarkdownRenderSegment: Hashable {
     case text([MarkdownBlock])
     case code(String, language: String?)
     case table(header: [String]?, rows: [[String]])
+    case htmlWidget(String)
 
     static func segments(from blocks: [MarkdownBlock]) -> [MarkdownRenderSegment] {
         var segments: [MarkdownRenderSegment] = []
@@ -29,6 +30,13 @@ enum MarkdownRenderSegment: Hashable {
             case .table(let header, let rows):
                 flushText()
                 segments.append(.table(header: header, rows: rows))
+            case .paragraph(let text):
+                if let reference = HTMLArtifact.reference(in: text) {
+                    flushText()
+                    segments.append(.htmlWidget(reference))
+                } else {
+                    textRun.append(block)
+                }
             default:
                 textRun.append(block)
             }

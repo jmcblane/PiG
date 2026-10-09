@@ -129,6 +129,7 @@ cp "$EXECUTABLE" "$APP/Contents/MacOS/$APP_NAME"
 chmod +x "$APP/Contents/MacOS/$APP_NAME"
 cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
 cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
+cp -R "$ROOT_DIR/Resources/extensions" "$APP/Contents/Resources/extensions"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

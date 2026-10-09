@@ -77,6 +77,8 @@ struct ToolActivityView: View {
     let textSizeStep: Int
     let showThinkingTraces: Bool
     let highlightedMessageID: String?
+    var htmlArtifacts: [String: HTMLArtifact] = [:]
+    var htmlActionTarget: SessionController? = nil
     @State private var expanded = false
     @State private var observedActiveTurn = false
     @State private var hoveringSummary = false
@@ -142,7 +144,9 @@ struct ToolActivityView: View {
                         textSizeStep: textSizeStep,
                         showThinkingTraces: showThinkingTraces,
                         isHighlighted: highlightedMessageID == message.id,
-                        showsActivityIndicator: false
+                        showsActivityIndicator: false,
+                        htmlArtifacts: HTMLArtifact.selected(from: htmlArtifacts, in: message.text),
+                        htmlActionTarget: htmlActionTarget
                     )
                     .equatable()
                     .background {

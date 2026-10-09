@@ -33,6 +33,7 @@ struct ChatScrollView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let presentation = transcriptPresentation
             ZStack(alignment: .bottomTrailing) {
                 ReliableBottomScrollView(
                     isAtBottom: $isAtBottom,
@@ -49,7 +50,7 @@ struct ChatScrollView: View {
                                 controller.loadEarlierMessages()
                             }
                         }
-                        ForEach(transcriptPresentation.items) { item in
+                        ForEach(presentation.items) { item in
                             switch item {
                             case .message(let message):
                                 ChatMessageRow(
@@ -59,7 +60,9 @@ struct ChatScrollView: View {
                                     theme: theme,
                                     textSizeStep: model.textSizeStep,
                                     showThinkingTraces: model.showThinkingTraces,
-                                    isHighlighted: highlightedMessageID == message.id
+                                    isHighlighted: highlightedMessageID == message.id,
+                                    htmlArtifacts: presentation.widgets(for: message),
+                                    htmlActionTarget: controller
                                 )
                                 .equatable()
                                 .background {
@@ -74,8 +77,15 @@ struct ChatScrollView: View {
                                     theme: theme,
                                     textSizeStep: model.textSizeStep,
                                     showThinkingTraces: model.showThinkingTraces,
-                                    highlightedMessageID: highlightedMessageID
+                                    highlightedMessageID: highlightedMessageID,
+                                    htmlArtifacts: presentation.htmlArtifacts,
+                                    htmlActionTarget: controller
                                 )
+                            case .htmlArtifact(let artifact):
+                                HTMLArtifactView(artifact: artifact, theme: theme, textSizeStep: model.textSizeStep, onSendMessage: sendHTMLMessage)
+                                    .padding(.leading, 18)
+                                    .padding(.trailing, 18)
+                                    .padding(.vertical, 8)
                             case .userTools(let messageID, let tools):
                                 ToolGroupView(tools: tools, projectPath: controller.projectPath)
                                     .padding(.leading, 36)
@@ -146,6 +156,12 @@ struct ChatScrollView: View {
     }
 }
 
+private extension ChatScrollView {
+    func sendHTMLMessage(_ text: String) {
+        Task { await controller.sendHTMLWidgetMessage(text) }
+    }
+}
+
 struct JumpToBottomButtonStyle: ButtonStyle {
     @Environment(\.appTheme) private var appTheme
     func makeBody(configuration: Configuration) -> some View {
@@ -205,6 +221,7 @@ struct ToolPresentationGroup: Hashable {
 private enum TranscriptPresentationItem: Identifiable {
     case message(ChatMessage)
     case toolGroup(ToolPresentationGroup)
+    case htmlArtifact(HTMLArtifact)
     case userTools(messageID: String, tools: [ToolDisplay])
     case anchor(String)
 
@@ -212,6 +229,7 @@ private enum TranscriptPresentationItem: Identifiable {
         switch self {
         case .message(let message): return "message-\(message.id)"
         case .toolGroup(let group): return group.id
+        case .htmlArtifact(let artifact): return "html-artifact-\(artifact.id)"
         case .userTools(let messageID, _): return "user-tools-\(messageID)"
         case .anchor(let messageID): return "anchor-\(messageID)"
         }
@@ -220,6 +238,12 @@ private enum TranscriptPresentationItem: Identifiable {
 
 private struct TranscriptToolPresentation {
     var items: [TranscriptPresentationItem] = []
+    var htmlArtifacts: [String: HTMLArtifact] = [:]
+
+    func widgets(for message: ChatMessage) -> [String: HTMLArtifact] {
+        guard message.role == .assistant else { return [:] }
+        return HTMLArtifact.selected(from: htmlArtifacts, in: message.text)
+    }
 
     private struct AccumulatedGroup {
         var id: String
@@ -257,6 +281,13 @@ private struct TranscriptToolPresentation {
             }
         }
 
+        for group in groups.values {
+            for tool in group.tools {
+                if let artifact = HTMLArtifact(tool: tool) {
+                    htmlArtifacts[artifact.reference] = artifact
+                }
+            }
+        }
         let activeSegment = messages.last.map { segmentByMessageID[$0.id] } ?? nil
         var groupByHostMessageID: [String: ToolPresentationGroup] = [:]
         var groupedMessageIDs = Set<String>()
@@ -284,7 +315,8 @@ private struct TranscriptToolPresentation {
 
             for message in group.messages where message.role != .user {
                 let automaticTools = message.tools.filter { $0.userLabel == nil }
-                let isVisibleOutput = message.role == .assistant && message.id == visibleOutputID
+                let containsWidget = message.role == .assistant && !widgets(for: message).isEmpty
+                let isVisibleOutput = message.role == .assistant && (message.id == visibleOutputID || containsWidget)
                 let isIntermediateAssistant = message.role == .assistant && !isVisibleOutput
                 let belongsToActivity = !isVisibleOutput && (isIntermediateAssistant
                     || (!automaticTools.isEmpty && !Self.hasVisibleContent(message, showThinkingTraces: showThinkingTraces)))
@@ -332,6 +364,18 @@ private struct TranscriptToolPresentation {
         for message in visibleMessages {
             if let group = groupByHostMessageID[message.id] {
                 items.append(.toolGroup(group))
+                // Legacy output and widgets whose markers were omitted still
+                // have a fallback. Referenced widgets render only in the reply.
+                let groupMessages = groups[group.id]?.messages ?? []
+                let references = groupMessages.filter { $0.role == .assistant }
+                    .reduce(into: Set<String>()) { $0.formUnion(HTMLArtifact.references(in: $1.text)) }
+                if !group.isActive, !groupMessages.contains(where: { $0.isStreaming }) {
+                    for tool in group.tools {
+                        if let artifact = HTMLArtifact(tool: tool), !references.contains(artifact.reference) {
+                            items.append(.htmlArtifact(artifact))
+                        }
+                    }
+                }
             }
             let userTools = message.tools.filter { $0.userLabel != nil }
             if !userTools.isEmpty {
@@ -387,6 +431,8 @@ struct ChatMessageRow: View, Equatable {
     let showThinkingTraces: Bool
     let isHighlighted: Bool
     var showsActivityIndicator = true
+    var htmlArtifacts: [String: HTMLArtifact] = [:]
+    var htmlActionTarget: SessionController? = nil
     @State private var hovering = false
     @State private var copied = false
 
@@ -398,7 +444,9 @@ struct ChatMessageRow: View, Equatable {
         lhs.textSizeStep == rhs.textSizeStep &&
         lhs.showThinkingTraces == rhs.showThinkingTraces &&
         lhs.isHighlighted == rhs.isHighlighted &&
-        lhs.showsActivityIndicator == rhs.showsActivityIndicator
+        lhs.showsActivityIndicator == rhs.showsActivityIndicator &&
+        lhs.htmlArtifacts == rhs.htmlArtifacts &&
+        lhs.htmlActionTarget === rhs.htmlActionTarget
     }
 
     var body: some View {
@@ -497,18 +545,31 @@ struct ChatMessageRow: View, Equatable {
                 textSizeStep: textSizeStep
             )
         } else if !message.text.isEmpty {
-            NativeMarkdownView(markdown: message.text, role: message.role, theme: theme, isStreaming: message.isStreaming, textSizeStep: textSizeStep)
+            NativeMarkdownView(
+                markdown: message.text, role: message.role, theme: theme,
+                isStreaming: message.isStreaming, textSizeStep: textSizeStep,
+                htmlArtifacts: htmlArtifacts,
+                onSendHTMLMessage: htmlActionTarget == nil ? nil : sendHTMLMessage
+            )
         }
+    }
+
+    private func sendHTMLMessage(_ text: String) {
+        guard let target = htmlActionTarget else { return }
+        Task { await target.sendHTMLWidgetMessage(text) }
     }
 
     private func copyMessage() {
         NSPasteboard.general.clearContents()
-        let copiedText: String
+        var copiedText: String
         if let canonicalText = message.canonicalText {
             copiedText = ComposerTokenCodec.plainText(from: canonicalText)
         } else {
             let references = message.references.map(\.plainText).joined(separator: " ")
             copiedText = [references, message.text].filter { !$0.isEmpty }.joined(separator: references.isEmpty ? "" : "\n")
+        }
+        for artifact in htmlArtifacts.values {
+            copiedText = copiedText.replacingOccurrences(of: artifact.marker, with: "[\(artifact.title)]")
         }
         NSPasteboard.general.setString(copiedText, forType: .string)
         copied = true

@@ -40,6 +40,46 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 - Queue steering and follow-up messages while the agent works (Option-Up returns queued messages to the composer)
 - Context-usage meter in the composer
 
+### Inline HTML controls
+
+PiG loads a bundled `html_render` extension into its chat-session pi processes.
+It does not install anything in pi's agent directory or change standalone pi
+sessions.
+
+Ask the agent: **“Write a normal Markdown answer with an interactive counter
+between two paragraphs, plus an Explain button that sends you a message.”**
+The tool creates small HTML fragments, not full webpages. PiG supplies themed
+buttons and inputs, matches the chat background, and measures content height
+(up to 1000 pixels). There is no surrounding card or title bar. Explanations
+and notes belong in the assistant's Markdown, not in the HTML. Vertical wheel
+and trackpad scrolling over ordinary controls scrolls the chat; widgets taller
+than the height cap retain internal scrolling.
+
+The tool returns a `[[pig-ui:...]]` marker; the agent puts it on its own line
+between paragraphs, outside code fences. PiG replaces it with the controls.
+Local JavaScript can change the UI. For agent-facing buttons, the tool declares
+`actions: [{ id: "explain", message: "Explain these options." }]` and the HTML
+uses `<button data-pig-action="explain">Explain</button>`. A genuine click
+shows the exact declared message for confirmation. Sending uses the normal
+prompt path (queued as a follow-up if the agent is busy), never shell or local
+slash-command execution. Messages are currently static; JavaScript
+cannot supply arbitrary message text.
+
+Hover/right-click for Source, Copy HTML, Save HTML, and Reload Controls. Widget
+state is temporary and resets on reload/reopening; the original markup and
+declared actions remain in session history through tool-result details.
+
+Fragments must be self-contained (up to 256 KiB): inline CSS/JavaScript, SVG,
+and data URLs work. The renderer uses an opaque-origin sandboxed iframe,
+nonpersistent WebKit storage, CSP, offline content rules, and disabled WebRTC.
+A trusted isolated-world script handles only content sizing and allowlisted
+button actions; generated JavaScript cannot access the native handler.
+Theme CSS variables include `--pig-bg`, `--pig-fg`, `--pig-muted`, `--pig-accent`,
+`--pig-panel`, and `--pig-border`. Use `.pig-controls` for a spaced button row,
+`.pig-primary` for an accented button, or `.pig-link` for a text button. Save
+exports the original fragment; PiG's styling, actions, and sandbox do not apply
+when that file is opened in another app.
+
 ### Models
 
 - Model and thinking-level pickers for each session
