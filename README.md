@@ -29,6 +29,12 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 - Several sessions can run at once; idle ones can be unloaded or reloaded
 - macOS notification when a reply finishes while you're in another app
 
+### Agents & Hermes
+
+- Create reusable pi agents with your choice of model, extensions, and skills. Selected skills are automatically included in context for every chat.
+- Connect local or remote Hermes agents and chat with them in PiG.
+- Switch between agents and projects in the picker; agent chats appear as sidebar threads.
+
 ### Chat & composer
 
 - Markdown rendering with syntax-highlighted code previews
