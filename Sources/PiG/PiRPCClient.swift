@@ -5,11 +5,16 @@ struct PiLaunchResources {
     var extensions: [String] = []
     var skills: [String] = []
     var prompts: [String] = []
+    var appendedSystemPrompts: [String] = []
+    var noExtensions = false
 
-    init(extensions: [String] = [], skills: [String] = [], prompts: [String] = []) {
+    init(extensions: [String] = [], skills: [String] = [], prompts: [String] = [],
+         appendedSystemPrompts: [String] = [], noExtensions: Bool = false) {
         self.extensions = extensions
         self.skills = skills
         self.prompts = prompts
+        self.appendedSystemPrompts = appendedSystemPrompts
+        self.noExtensions = noExtensions
     }
 
     init(items: [PiResourceItem]) {
@@ -21,9 +26,11 @@ struct PiLaunchResources {
     }
 
     var arguments: [String] {
+        (noExtensions ? ["--no-extensions"] : []) +
         extensions.flatMap { ["--extension", $0] } +
         skills.flatMap { ["--skill", $0] } +
-        prompts.flatMap { ["--prompt-template", $0] }
+        prompts.flatMap { ["--prompt-template", $0] } +
+        appendedSystemPrompts.flatMap { ["--append-system-prompt", $0] }
     }
 }
 

@@ -35,14 +35,15 @@ struct ChatPaneView: View {
                 let size = geometry.size.nonZero
                 let chat = chatRect(in: size, workspace: workspace)
                 let terminal = terminalRect(in: size, workspace: workspace)
+                let draftKey = controller?.id ?? model.selectedHermesController.map { "hermes:\($0.chatID)" } ?? "__none__"
 
                 ZStack(alignment: .topLeading) {
                     ChatTabContent(
                         controller: controller,
                         selectedProjectPath: model.selectedProjectPath,
                         theme: model.selectedTheme,
-                        draft: draftBinding(forKey: controller?.id ?? "__none__"),
-                        imageAttachments: imageDraftBinding(forKey: controller?.id ?? "__none__")
+                        draft: draftBinding(forKey: draftKey),
+                        imageAttachments: imageDraftBinding(forKey: draftKey)
                     )
                         .frame(width: chat.width, height: chat.height, alignment: .topLeading)
                         .offset(x: chat.minX, y: chat.minY)

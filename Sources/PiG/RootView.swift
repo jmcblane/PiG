@@ -189,6 +189,14 @@ struct RootView: View {
         .onChange(of: sidebarWidth) { _, width in
             SidebarPreference.width = min(max(width, minSidebarWidth), maxSidebarWidth)
         }
+        .sheet(item: Binding(
+            get: { model.agentEditorInSettings ? nil : model.agentEditorRequest },
+            set: { model.agentEditorRequest = $0 }
+        )) { request in
+            AgentEditorView(request: request)
+                .environmentObject(model)
+                .environment(\.appTheme, appTheme)
+        }
         .alert(item: $model.sessionPendingDeletion) { request in
             Alert(
                 title: Text("Move Session to Trash?"),
@@ -415,15 +423,18 @@ struct SessionsSidebarContent: View {
     }
 
     private var resolvedInboxIDs: [String] {
-        model.sessionInboxIDs.filter { model.inboxController(for: $0) != nil || model.inboxSummary(for: $0) != nil }
+        model.sessionInboxIDs.filter { model.inboxHermesChat(for: $0) != nil || model.inboxController(for: $0) != nil || model.inboxSummary(for: $0) != nil }
     }
 
     private func inboxText(for itemID: String) -> String {
+        if let chat = model.inboxHermesChat(for: itemID) {
+            return "\(chat.title) \(model.hermesAgent(for: chat)?.name ?? "Hermes")".lowercased()
+        }
         if let controller = model.inboxController(for: itemID) {
-            return "\(controller.title) \(controller.projectName)".lowercased()
+            return "\(controller.title) \(model.agent(for: controller)?.name ?? controller.projectName)".lowercased()
         }
         guard let summary = model.inboxSummary(for: itemID) else { return "" }
-        return "\(summary.title) \(model.projectDisplayName(for: summary.projectPath))".lowercased()
+        return "\(summary.title) \(model.agent(forSessionPath: summary.filePath)?.name ?? model.projectDisplayName(for: summary.projectPath))".lowercased()
     }
 
     private var visibleInboxIDs: [String] {
@@ -850,7 +861,13 @@ private struct InboxSessionItemRow: View {
 
     var body: some View {
         Group {
-            if let controller = model.inboxController(for: itemID) {
+            if let chat = model.inboxHermesChat(for: itemID) {
+                if let controller = model.hermesControllers[chat.id] {
+                    LoadedHermesChatRow(chat: chat, controller: controller, revealedItemID: $revealedItemID)
+                } else {
+                    HermesChatRow(chat: chat, revealedItemID: $revealedItemID)
+                }
+            } else if let controller = model.inboxController(for: itemID) {
                 InboxControllerRow(
                     itemID: itemID,
                     controller: controller,
@@ -914,7 +931,8 @@ private struct InboxControllerRow: View {
     var body: some View {
         InboxSessionListRow(
             title: controller.title.isEmpty ? (controller.isQuickChat ? "Quick Chat" : "Untitled") : controller.title,
-            projectName: controller.projectName,
+            projectName: model.agent(for: controller)?.name ?? controller.projectName,
+            agentLook: model.agent(for: controller)?.look,
             quickChat: controller.isQuickChat,
             selected: model.selectedControllerID == controller.id,
             working: controller.showsActivityIndicator,
@@ -952,7 +970,8 @@ private struct InboxSummaryRow: View {
     var body: some View {
         InboxSessionListRow(
             title: summary.title,
-            projectName: URL(fileURLWithPath: summary.projectPath).lastPathComponent,
+            projectName: model.agent(forSessionPath: summary.filePath)?.name ?? URL(fileURLWithPath: summary.projectPath).lastPathComponent,
+            agentLook: model.agent(forSessionPath: summary.filePath)?.look,
             quickChat: model.isQuickChatInboxItem(itemID),
             selected: model.selectedController?.sessionPath == summary.filePath,
             working: model.activeController(forSessionPath: summary.filePath) != nil,
@@ -976,17 +995,111 @@ private struct InboxSummaryRow: View {
     }
 }
 
+private struct LoadedHermesChatRow: View {
+    let chat: HermesChatRecord
+    @ObservedObject var controller: HermesChatController
+    @Binding var revealedItemID: String?
+    var archived = false
+
+    var body: some View {
+        HermesChatRow(chat: chat, revealedItemID: $revealedItemID, archived: archived,
+                      working: controller.isWorking, loaded: controller.isLoaded,
+                      needsInput: controller.approval != nil)
+    }
+}
+
+private struct HermesChatRow: View {
+    @Environment(\.appTheme) private var appTheme
+    @EnvironmentObject private var model: AppModel
+    let chat: HermesChatRecord
+    @Binding var revealedItemID: String?
+    var archived = false
+    var working = false
+    var loaded = false
+    var needsInput = false
+    @State private var confirmingDeletion = false
+
+    private var itemID: String { "hermes:\(chat.id)" }
+    private var agent: Agent? { model.hermesAgent(for: chat) }
+
+    var body: some View {
+        Group {
+            if archived {
+                Button { model.selectHermesChat(agentID: chat.agentID, chatID: chat.id) } label: {
+                    HStack(spacing: 8) {
+                        if let agent { AgentAvatar(look: agent.look, size: 24) }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(chat.title)
+                                .font(AppFonts.ui(13.5))
+                                .foregroundStyle(appTheme.text)
+                                .lineLimit(2)
+                            Text(agent?.name ?? "Hermes")
+                                .font(AppFonts.ui(11.5))
+                                .foregroundStyle(appTheme.muted)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                InboxSessionListRow(
+                    title: chat.title,
+                    projectName: agent?.name ?? "Hermes",
+                    agentLook: agent?.look,
+                    quickChat: false,
+                    selected: model.selectedHermesChatID == chat.id,
+                    working: working,
+                    loaded: loaded,
+                    finishedUnseen: model.hermesUnreadChatIDs.contains(chat.id),
+                    needsInput: needsInput,
+                    isChild: false,
+                    itemID: itemID,
+                    revealedItemID: $revealedItemID,
+                    done: { model.markInboxItemDone(itemID) },
+                    action: { model.selectHermesChat(agentID: chat.agentID, chatID: chat.id) }
+                )
+            }
+        }
+        .contextMenu {
+            if !archived {
+                Button("Done", systemImage: "checkmark") {
+                    revealedItemID = nil
+                    model.markInboxItemDone(itemID)
+                }
+                .disabled(working)
+                Divider()
+            }
+            Button("Move Local Chat to Trash…", systemImage: "trash", role: .destructive) {
+                confirmingDeletion = true
+            }
+            .disabled(working)
+        }
+        .alert("Move local Hermes chat to Trash?", isPresented: $confirmingDeletion) {
+            Button("Cancel", role: .cancel) {}
+            Button("Move to Trash", role: .destructive) { model.deleteHermesChat(chat.id) }
+        } message: {
+            Text("\"\(chat.title)\" will be removed from PiG and its local journal moved to Trash. Remote server data is unchanged.")
+        }
+    }
+}
+
 private struct InboxSessionListRow: View {
     @Environment(\.appTheme) private var appTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var model: AppModel
     let title: String
     let projectName: String
+    let agentLook: Look?
     let quickChat: Bool
     let selected: Bool
     let working: Bool
     let loaded: Bool
     let finishedUnseen: Bool
+    var needsInput: Bool = false
     let isChild: Bool
     let itemID: String
     @Binding var revealedItemID: String?
@@ -1043,7 +1156,7 @@ private struct InboxSessionListRow: View {
                 .buttonStyle(.plain)
                 .offset(x: -revealAmount)
                 .accessibilityLabel("\(title), \(projectName)")
-                .accessibilityValue("\(loaded ? "Loaded" : "Unloaded"), \(working ? "working" : finishedUnseen ? "new reply" : "idle")")
+                .accessibilityValue("\(loaded ? "Loaded" : "Unloaded"), \(needsInput ? "needs input" : working ? "working" : finishedUnseen ? "new reply" : "idle")")
                 .accessibilityHint(working ? "Working sessions stay in the inbox." : "Swipe left or press Delete to reveal Done.")
                 .onKeyPress(.delete) {
                     revealForKeyboard()
@@ -1094,15 +1207,22 @@ private struct InboxSessionListRow: View {
                     Spacer(minLength: 0)
                 }
                 if !quickChat {
-                    Text(projectName)
-                        .font(AppFonts.ui(11.5))
-                        .foregroundStyle(loaded ? appTheme.secondaryText.opacity(0.72) : appTheme.muted)
-                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        if let agentLook { AgentAvatar(look: agentLook, size: 16) }
+                        Text(projectName)
+                            .font(AppFonts.ui(11.5))
+                            .foregroundStyle(loaded ? appTheme.secondaryText.opacity(0.72) : appTheme.muted)
+                            .lineLimit(1)
+                    }
                 }
             }
             Spacer(minLength: 0)
             Group {
-                if working && !selected {
+                if needsInput {
+                    Image(systemName: "questionmark.circle.fill")
+                        .foregroundStyle(appTheme.brass)
+                        .help("Needs input")
+                } else if working && !selected {
                     SignalMarch(presentation: .compact)
                         .help("Working")
                 } else if finishedUnseen {
@@ -1429,7 +1549,7 @@ struct SessionArchiveContent: View {
 
     private var archiveProjectPaths: [String] {
         let available: Set<String> = Set(model.archivedSessionsByProject.compactMap { path, sessions -> String? in
-            guard !model.isQuickChatsProject(path), sessions.contains(where: { !$0.isChildSession }) else { return nil }
+            guard sessions.contains(where: { !$0.isChildSession }) else { return nil }
             return path
         })
         let registered = model.projects.map(\.path).filter { available.contains($0) }
@@ -1483,7 +1603,22 @@ struct SessionArchiveContent: View {
         }
     }
 
+    private var filteredHermesChats: [HermesChatRecord] {
+        guard selectedProjectPath == nil, !isProjectHistory else { return [] }
+        return model.hermesChats.filter { chat in
+            normalizedSearch.isEmpty || "\(chat.title) \(model.hermesAgent(for: chat)?.name ?? "Hermes")".lowercased().contains(normalizedSearch)
+        }.sorted { $0.lastActivity > $1.lastActivity }
+    }
+
+    private var hermesArchiveAgentIDs: [String] {
+        let chats = filteredHermesChats
+        // Preserve newest-first group order, with chats newest-first inside each agent.
+        var seen = Set<String>()
+        return chats.map(\.agentID).filter { seen.insert($0).inserted }
+    }
+
     private var hasNoSessions: Bool {
+        if !filteredHermesChats.isEmpty { return false }
         if normalizedSearch.isEmpty { return rootSessions.isEmpty }
         if selectedProjectPath == nil { return searchProjectGroups.isEmpty }
         return filteredSessions.isEmpty
@@ -1564,6 +1699,20 @@ struct SessionArchiveContent: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0, pinnedViews: normalizedSearch.isEmpty ? [.sectionHeaders] : []) {
+                        ForEach(hermesArchiveAgentIDs, id: \.self) { agentID in
+                            let chats = filteredHermesChats.filter { $0.agentID == agentID }
+                            Section {
+                                ForEach(chats) { chat in
+                                    if let controller = model.hermesControllers[chat.id] {
+                                        LoadedHermesChatRow(chat: chat, controller: controller, revealedItemID: .constant(nil), archived: true)
+                                    } else {
+                                        HermesChatRow(chat: chat, revealedItemID: .constant(nil), archived: true)
+                                    }
+                                }
+                            } header: {
+                                SessionArchiveMonthHeader(title: chats.first.flatMap { model.hermesAgent(for: $0)?.name } ?? "Hermes")
+                            }
+                        }
                         if normalizedSearch.isEmpty {
                             ForEach(monthGroups) { group in
                                 Section {
@@ -1729,13 +1878,15 @@ struct SessionRow: View {
 
     private var subtitle: String {
         let base = "\(summary.timestamp.sidebarLabel)   \(summary.messageCount) msgs"
-        return showsProject ? "\(model.projectDisplayName(for: summary.projectPath))   ·   \(base)" : base
+        let owner = model.agent(forSessionPath: summary.filePath)
+        return showsProject || owner != nil ? "\(owner?.name ?? model.projectDisplayName(for: summary.projectPath))   ·   \(base)" : base
     }
 
     var body: some View {
         SessionListRow(
             title: summary.title,
             subtitle: subtitle,
+            agentLook: model.agent(forSessionPath: summary.filePath)?.look,
             selected: model.selectedController?.sessionPath == summary.filePath,
             named: summary.named,
             active: model.activeController(forSessionPath: summary.filePath) != nil,
@@ -1821,6 +1972,7 @@ struct SessionListRow: View {
     @Environment(\.appTheme) private var appTheme
     let title: String
     let subtitle: String
+    var agentLook: Look? = nil
     let selected: Bool
     let named: Bool
     let active: Bool
@@ -1842,9 +1994,12 @@ struct SessionListRow: View {
                             .font(AppFonts.ui(13.5, weight: named ? .semibold : .regular))
                             .foregroundStyle(selected ? appTheme.text : appTheme.secondaryText)
                             .lineLimit(1)
-                        Text(subtitle)
-                            .font(AppFonts.ui(11.5))
-                            .foregroundStyle(appTheme.muted)
+                        HStack(spacing: 5) {
+                            if let agentLook { AgentAvatar(look: agentLook, size: 16) }
+                            Text(subtitle)
+                                .font(AppFonts.ui(11.5))
+                                .foregroundStyle(appTheme.muted)
+                        }
                     }
                     Spacer()
                 }

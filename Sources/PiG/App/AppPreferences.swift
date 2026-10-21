@@ -110,18 +110,20 @@ enum TitleGenerationExtensionsPreference {
 
 enum SessionInboxStore {
     private static let key = "PiG.sidebar.sessionInbox"
-    private static let sessionPrefix = "session:"
+    private static func isPersistent(_ id: String) -> Bool {
+        id.hasPrefix("session:") || id.hasPrefix("hermes:")
+    }
 
     static var ids: [String] {
         let stored = UserDefaults.standard.stringArray(forKey: key) ?? []
         var seen = Set<String>()
         return stored
-            .filter { $0.hasPrefix(sessionPrefix) }
+            .filter(isPersistent)
             .filter { seen.insert($0).inserted }
     }
 
     static func save(_ ids: [String]) {
-        UserDefaults.standard.set(ids.filter { $0.hasPrefix(sessionPrefix) }, forKey: key)
+        UserDefaults.standard.set(ids.filter(isPersistent), forKey: key)
     }
 }
 

@@ -281,7 +281,7 @@ private struct ScheduleStatus: View {
     }
 }
 
-private struct ModelSelectionControl: View {
+struct ModelSelectionControl: View {
     let title: String
     @Binding var selection: String
     let models: [ModelInfo]

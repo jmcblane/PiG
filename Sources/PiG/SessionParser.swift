@@ -426,7 +426,8 @@ enum SessionParser {
             switch entry.type {
             case "message":
                 guard let agent = entry.dict["message"] as? [String: Any],
-                      let msg = chatMessage(fromAgentMessage: agent, id: entry.id ?? UUID().uuidString) else { continue }
+                      var msg = chatMessage(fromAgentMessage: agent, id: entry.id ?? UUID().uuidString) else { continue }
+                if msg.role == .assistant { msg.completedAt = entry.timestamp }
                 if msg.role == .system, msg.text.isEmpty, let tool = msg.tools.first, tool.userLabel == nil {
                     attachToolResult(tool, to: &messages)
                 } else {

@@ -2,10 +2,35 @@ import SwiftUI
 import AppKit
 import ImageIO
 
-struct ChatScrollView: View {
+/// What the shared transcript reads. Pi (`SessionController`) and Hermes
+/// (`HermesChatController`) chats conform so both render through `ChatScrollView`.
+@MainActor
+protocol ChatTranscriptSource: ObservableObject {
+    var id: String { get }
+    var messages: [ChatMessage] { get }
+    var visibleMessages: [ChatMessage] { get }
+    var hiddenMessageCount: Int { get }
+    func loadEarlierMessages()
+    var isWorking: Bool { get }
+    var isThinking: Bool { get }
+    var isCompacting: Bool { get }
+    var transcriptProjectPath: String? { get }
+    var streamingFrameToken: Int { get }
+    var messageScrollRequest: MessageScrollRequest? { get }
+    var bottomScrollRequest: Int { get }
+    /// Receives HTML widget actions; nil disables them.
+    var htmlActionTarget: SessionController? { get }
+}
+
+extension SessionController: ChatTranscriptSource {
+    var transcriptProjectPath: String? { projectPath }
+    var htmlActionTarget: SessionController? { self }
+}
+
+struct ChatScrollView<Controller: ChatTranscriptSource>: View {
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
-    @ObservedObject var controller: SessionController
+    @ObservedObject var controller: Controller
     let theme: AppThemeChoice
     @State private var isAtBottom = true
     @State private var forceScrollToken = 0
@@ -55,14 +80,15 @@ struct ChatScrollView: View {
                             case .message(let message):
                                 ChatMessageRow(
                                     message: message,
-                                    projectPath: controller.projectPath,
+                                    projectPath: controller.transcriptProjectPath,
                                     activityText: activityText,
                                     theme: theme,
                                     textSizeStep: model.textSizeStep,
                                     showThinkingTraces: model.showThinkingTraces,
                                     isHighlighted: highlightedMessageID == message.id,
                                     htmlArtifacts: presentation.widgets(for: message),
-                                    htmlActionTarget: controller
+                                    htmlActionTarget: controller.htmlActionTarget,
+                                    turnTiming: presentation.turnTimings[message.id]
                                 )
                                 .equatable()
                                 .background {
@@ -72,22 +98,23 @@ struct ChatScrollView: View {
                             case .toolGroup(let group):
                                 ToolActivityView(
                                     group: group,
-                                    projectPath: controller.projectPath,
+                                    projectPath: controller.transcriptProjectPath,
                                     activityText: activityText,
                                     theme: theme,
                                     textSizeStep: model.textSizeStep,
                                     showThinkingTraces: model.showThinkingTraces,
                                     highlightedMessageID: highlightedMessageID,
                                     htmlArtifacts: presentation.htmlArtifacts,
-                                    htmlActionTarget: controller
+                                    htmlActionTarget: controller.htmlActionTarget
                                 )
                             case .htmlArtifact(let artifact):
-                                HTMLArtifactView(artifact: artifact, theme: theme, textSizeStep: model.textSizeStep, onSendMessage: sendHTMLMessage)
+                                HTMLArtifactView(artifact: artifact, theme: theme, textSizeStep: model.textSizeStep,
+                                                 onSendMessage: controller.htmlActionTarget == nil ? nil : sendHTMLMessage)
                                     .padding(.leading, 18)
                                     .padding(.trailing, 18)
                                     .padding(.vertical, 8)
                             case .userTools(let messageID, let tools):
-                                ToolGroupView(tools: tools, projectPath: controller.projectPath)
+                                ToolGroupView(tools: tools, projectPath: controller.transcriptProjectPath)
                                     .padding(.leading, 36)
                                     .padding(.trailing, 18)
                                     .padding(.vertical, 6)
@@ -158,7 +185,8 @@ struct ChatScrollView: View {
 
 private extension ChatScrollView {
     func sendHTMLMessage(_ text: String) {
-        Task { await controller.sendHTMLWidgetMessage(text) }
+        guard let target = controller.htmlActionTarget else { return }
+        Task { await target.sendHTMLWidgetMessage(text) }
     }
 }
 
@@ -236,9 +264,29 @@ private enum TranscriptPresentationItem: Identifiable {
     }
 }
 
+/// Runtime of a finished turn: from the user's prompt to the final assistant message.
+struct TurnTiming: Hashable {
+    let end: Date
+    let duration: TimeInterval
+    let isLatest: Bool
+
+    var durationText: String {
+        let seconds = max(1, Int(duration.rounded()))
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(seconds / 60)m \(seconds % 60)s" }
+        return "\(seconds / 3600)h \(seconds % 3600 / 60)m"
+    }
+
+    var endText: String {
+        end.formatted(date: Calendar.current.isDateInToday(end) ? .omitted : .abbreviated, time: .shortened)
+    }
+}
+
 private struct TranscriptToolPresentation {
     var items: [TranscriptPresentationItem] = []
     var htmlArtifacts: [String: HTMLArtifact] = [:]
+    /// Keyed by the last rendered assistant message of each finished turn.
+    var turnTimings: [String: TurnTiming] = [:]
 
     func widgets(for message: ChatMessage) -> [String: HTMLArtifact] {
         guard message.role == .assistant else { return [:] }
@@ -388,6 +436,24 @@ private struct TranscriptToolPresentation {
                 items.append(.anchor(message.id))
             }
         }
+
+        var footerHostBySegment: [String: String] = [:]
+        for item in items {
+            if case .message(let message) = item, message.role == .assistant,
+               let segment = segmentByMessageID[message.id] {
+                footerHostBySegment[segment] = message.id
+            }
+        }
+        for (key, hostID) in footerHostBySegment {
+            guard !(isAgentActive && key == activeSegment),
+                  let group = groups[key],
+                  let prompt = group.messages.first, prompt.role == .user,
+                  let start = prompt.timestamp,
+                  let final = group.messages.last(where: { $0.role == .assistant }),
+                  !final.isStreaming,
+                  let end = final.completedAt, end >= start else { continue }
+            turnTimings[hostID] = TurnTiming(end: end, duration: end.timeIntervalSince(start), isLatest: key == order.last)
+        }
     }
 
     private static func hasAnswerContent(_ message: ChatMessage) -> Bool {
@@ -433,6 +499,7 @@ struct ChatMessageRow: View, Equatable {
     var showsActivityIndicator = true
     var htmlArtifacts: [String: HTMLArtifact] = [:]
     var htmlActionTarget: SessionController? = nil
+    var turnTiming: TurnTiming? = nil
     @State private var hovering = false
     @State private var copied = false
 
@@ -446,7 +513,8 @@ struct ChatMessageRow: View, Equatable {
         lhs.isHighlighted == rhs.isHighlighted &&
         lhs.showsActivityIndicator == rhs.showsActivityIndicator &&
         lhs.htmlArtifacts == rhs.htmlArtifacts &&
-        lhs.htmlActionTarget === rhs.htmlActionTarget
+        lhs.htmlActionTarget === rhs.htmlActionTarget &&
+        lhs.turnTiming == rhs.turnTiming
     }
 
     var body: some View {
@@ -457,13 +525,16 @@ struct ChatMessageRow: View, Equatable {
                 messageImages
             } else {
                 if showThinkingTraces, !message.thinking.isEmpty {
-                    NativeMarkdownView(markdown: message.thinking, role: .system, theme: theme, isStreaming: message.isStreaming, textSizeStep: textSizeStep)
+                    NativeMarkdownView(markdown: message.thinking, role: .system, theme: theme, isStreaming: message.isStreaming, projectPath: projectPath, textSizeStep: textSizeStep)
                 }
                 detachedReferences
                 messageImages
                 messageText
                 if message.isStreaming && showsActivityIndicator {
                     InlineActivityIndicator(text: activityText)
+                }
+                if let turnTiming {
+                    turnTimingFooter(turnTiming)
                 }
             }
         }
@@ -517,6 +588,25 @@ struct ChatMessageRow: View, Equatable {
         .padding(.top, message.role == .user ? 12 : 0)
     }
 
+    /// Faint duration on the latest turn; older turns show it on hover.
+    /// Hovering also reveals the completion time.
+    private func turnTimingFooter(_ timing: TurnTiming) -> some View {
+        HStack(spacing: 0) {
+            Text(timing.durationText)
+            if hovering {
+                Text(" · \(timing.endText)")
+                    .transition(.opacity)
+            }
+        }
+        .font(AppFonts.ui(11, weight: .medium))
+        .monospacedDigit()
+        .foregroundStyle(appTheme.muted)
+        .opacity(hovering ? 0.9 : (timing.isLatest ? 0.55 : 0))
+        .animation(.easeInOut(duration: 0.12), value: hovering)
+        .padding(.top, -4)
+        .accessibilityLabel("Worked for \(timing.durationText), finished \(timing.endText)")
+    }
+
     @ViewBuilder
     private var detachedReferences: some View {
         // Older envelopes did not retain reference positions, so only
@@ -547,7 +637,7 @@ struct ChatMessageRow: View, Equatable {
         } else if !message.text.isEmpty {
             NativeMarkdownView(
                 markdown: message.text, role: message.role, theme: theme,
-                isStreaming: message.isStreaming, textSizeStep: textSizeStep,
+                isStreaming: message.isStreaming, projectPath: projectPath, textSizeStep: textSizeStep,
                 htmlArtifacts: htmlArtifacts,
                 onSendHTMLMessage: htmlActionTarget == nil ? nil : sendHTMLMessage
             )

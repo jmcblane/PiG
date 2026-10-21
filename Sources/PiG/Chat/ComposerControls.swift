@@ -215,7 +215,7 @@ struct ThinkingPickerMenu: View {
     }
 }
 
-private struct TabStripPickerLabel: View {
+struct TabStripPickerLabel: View {
     @Environment(\.appTheme) private var appTheme
     let value: String
     let dot: Color

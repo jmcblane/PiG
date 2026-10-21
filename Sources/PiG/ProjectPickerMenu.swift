@@ -16,6 +16,12 @@ struct ProjectPickerMenu: View {
     let dismiss: () -> Void
 
     @State private var searchText = ""
+    @State private var pendingRemoval: Agent?
+    @State private var hoveredAgentID: String?
+
+    private var menuAgents: [Agent] {
+        model.agents.filter { normalizedSearch.isEmpty || "\($0.name) \($0.role)".lowercased().contains(normalizedSearch) }
+    }
     @FocusState private var searchFocused: Bool
 
     private var menuProjects: [ProjectInfo] {
@@ -45,7 +51,7 @@ struct ProjectPickerMenu: View {
                 Image(systemName: "magnifyingglass")
                     .font(AppFonts.ui(11, weight: .semibold))
                     .foregroundStyle(appTheme.muted)
-                TextField("Search all projects", text: $searchText)
+                TextField("Search projects and agents", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(AppFonts.ui(12.5))
                     .focused($searchFocused)
@@ -64,50 +70,163 @@ struct ProjectPickerMenu: View {
 
             PopoverMenuDivider()
 
-            ScrollView {
+            HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
-                    if normalizedSearch.isEmpty {
-                        if showsQuickChat {
-                            PopoverPickerRow(title: "Quick Chat", icon: "bolt.fill", isSelected: quickChatSelected) {
-                                dismiss()
-                                selectQuickChat()
+                    columnHeader("Agents")
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(menuAgents) { agent in agentRow(agent) }
+                            if menuAgents.isEmpty {
+                                emptyMessage(normalizedSearch.isEmpty ? "No agents yet" : "No matching agents")
                             }
-                            PopoverMenuDivider()
                         }
-                        ForEach(pinnedProjects) { project in projectRow(project) }
-                        if !pinnedProjects.isEmpty && !recentProjects.isEmpty { PopoverMenuDivider() }
-                        ForEach(recentProjects) { project in projectRow(project) }
-                        if (showsQuickChat ? !menuProjects.isEmpty : !pinnedProjects.isEmpty || !recentProjects.isEmpty) {
-                            PopoverMenuDivider()
-                        }
-                        PopoverPickerRow(title: "Add Existing Project…", icon: "folder.badge.plus") {
-                            dismiss()
-                            model.addExistingProject()
-                        }
-                        PopoverPickerRow(title: "Create Project Directory…", icon: "plus.square") {
-                            dismiss()
-                            model.createProject()
-                        }
-                    } else if searchedProjects.isEmpty {
-                        Text("No matching projects")
-                            .font(AppFonts.ui(12.5))
-                            .foregroundStyle(appTheme.muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 18)
-                    } else {
-                        ForEach(searchedProjects) { project in projectRow(project) }
+                        .padding(.vertical, 5)
+                    }
+                    .frame(height: 365)
+                }
+                .frame(width: width / 2)
+                .overlay(alignment: .trailing) {
+                    Rectangle()
+                        .fill(appTheme.line.opacity(0.6))
+                        .frame(width: 1)
+                }
+
+                VStack(alignment: .leading, spacing: 0) {
+                    columnHeader("Projects")
+                    ScrollView {
+                        projectList
+                            .padding(.vertical, 5)
+                    }
+                    .frame(height: 365)
+                }
+                .frame(width: width / 2)
+            }
+
+            PopoverMenuDivider()
+
+            HStack(alignment: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    PopoverPickerRow(title: "New Pi Agent…", icon: "person.badge.plus", checkmarkColumn: false) {
+                        dismiss()
+                        model.requestNewAgent(backend: .pi)
+                    }
+                    PopoverPickerRow(title: "New Hermes Agent…", icon: "antenna.radiowaves.left.and.right", checkmarkColumn: false) {
+                        dismiss()
+                        model.requestNewAgent(backend: .hermes)
                     }
                 }
-                .padding(.vertical, 5)
+                .frame(width: width / 2)
+                VStack(spacing: 0) {
+                    PopoverPickerRow(title: "Add Existing Project…", icon: "folder.badge.plus", checkmarkColumn: false) {
+                        dismiss()
+                        model.addExistingProject()
+                    }
+                    PopoverPickerRow(title: "Create Project Directory…", icon: "plus.square", checkmarkColumn: false) {
+                        dismiss()
+                        model.createProject()
+                    }
+                }
+                .frame(width: width / 2)
             }
+            .padding(.bottom, 5)
         }
         .frame(width: width)
-        .frame(maxHeight: 440)
+        .alert("Remove \(pendingRemoval?.name ?? "Agent")?", isPresented: Binding(
+            get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }
+        ), presenting: pendingRemoval) { agent in
+            Button("Remove", role: .destructive) { model.removeAgent(agent.id) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in Text("The agent will be removed. Chats are kept.") }
         .onAppear {
             searchText = ""
             if focusSearchOnAppear {
                 DispatchQueue.main.async { searchFocused = true }
             }
+        }
+    }
+
+    private func columnHeader(_ title: String) -> some View {
+        Text(title)
+            .font(AppFonts.ui(11, weight: .semibold))
+            .foregroundStyle(appTheme.muted)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func emptyMessage(_ message: String) -> some View {
+        Text(message)
+            .font(AppFonts.ui(12.5))
+            .foregroundStyle(appTheme.muted)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+    }
+
+    private var projectList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if normalizedSearch.isEmpty {
+                if showsQuickChat {
+                    PopoverPickerRow(title: "Quick Chat", icon: "bolt.fill", isSelected: quickChatSelected) {
+                        dismiss()
+                        selectQuickChat()
+                    }
+                    if !menuProjects.isEmpty { PopoverMenuDivider() }
+                }
+                ForEach(pinnedProjects) { project in projectRow(project) }
+                if !pinnedProjects.isEmpty && !recentProjects.isEmpty { PopoverMenuDivider() }
+                ForEach(recentProjects) { project in projectRow(project) }
+                if menuProjects.isEmpty && !showsQuickChat {
+                    emptyMessage("No projects yet")
+                }
+            } else if searchedProjects.isEmpty {
+                emptyMessage("No matching projects")
+            } else {
+                ForEach(searchedProjects) { project in projectRow(project) }
+            }
+        }
+    }
+
+    private func agentRow(_ agent: Agent) -> some View {
+        let selected = model.selectedAgent?.id == agent.id
+        return Button {
+            dismiss()
+            model.selectAgent(agent.id)
+        } label: {
+            HStack(spacing: 8) {
+                AgentAvatar(look: agent.look, size: 32)
+                    .fixedSize()
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(agent.name)
+                        .font(AppFonts.ui(12.5, weight: selected ? .semibold : .regular))
+                        .foregroundStyle(appTheme.text)
+                    Text(agent.role)
+                        .font(AppFonts.ui(11.5))
+                        .foregroundStyle(appTheme.muted)
+                }
+                .lineLimit(1)
+                .truncationMode(.tail)
+                Spacer(minLength: 0)
+                Image(systemName: "checkmark")
+                    .font(AppFonts.ui(10, weight: .bold))
+                    .foregroundStyle(appTheme.brass)
+                    .opacity(selected ? 1 : 0)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(hoveredAgentID == agent.id ? appTheme.brass.opacity(0.12) : Color.clear)
+        .onHover { hovering in
+            if hovering { hoveredAgentID = agent.id }
+            else if hoveredAgentID == agent.id { hoveredAgentID = nil }
+        }
+        .accessibilityLabel(Text("\(agent.name), \(agent.role)"))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .contextMenu {
+            Button("Edit…") { dismiss(); model.requestEditAgent(agent.id) }
+            Button("Remove…", role: .destructive) { pendingRemoval = agent }
         }
     }
 

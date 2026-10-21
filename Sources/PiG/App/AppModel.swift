@@ -31,6 +31,7 @@ struct SessionDeletionRequest: Identifiable {
 private struct InboxDismissalUndo {
     let items: [(id: String, index: Int)]
     let selectedControllerID: String?
+    let selectedHermesChatID: String?
     let title: String
 }
 
@@ -49,6 +50,21 @@ final class AppModel: ObservableObject {
         didSet { SessionInboxStore.save(sessionInboxIDs) }
     }
     @Published private var inboxDismissalUndo: InboxDismissalUndo?
+    // Agents (see AppModel+Agents.swift).
+    @Published var agents: [Agent] = AgentStore.load()
+    /// Set only for agent landings and Hermes chats; pi threads use selectedControllerID.
+    @Published var selectedAgentID: String?
+    @Published var selectedHermesChatID: String?
+    @Published var hermesLandingDraftController: HermesChatController?
+    @Published var agentSessionRecords = AgentSessionStore.load()
+    @Published var agentRecentSessions: [String: [SessionSummary]] = [:]
+    @Published var agentEditorRequest: AgentEditorRequest?
+    @Published var agentEditorInSettings = false
+    /// Hermes controllers keyed by chat UUID.
+    @Published var hermesControllers: [String: HermesChatController] = [:]
+    @Published var hermesChats: [HermesChatRecord] = HermesChatStore.load()
+    /// Hermes replies finished while their chat was not selected.
+    @Published var hermesUnreadChatIDs: Set<String> = []
     @Published private(set) var pinnedResourceIDs: [String] = PinnedResourceStore.ids {
         didSet { PinnedResourceStore.save(pinnedResourceIDs) }
     }
@@ -176,6 +192,7 @@ final class AppModel: ObservableObject {
 
     var extensionPromptController: SessionController? {
         if let selectedController, selectedController.extensionUIPrompt != nil { return selectedController }
+        if let landingDraftController, landingDraftController.extensionUIPrompt != nil { return landingDraftController }
         return controllers.values
             .filter { $0.extensionUIPrompt != nil }
             .sorted { $0.lastRuntimeUse > $1.lastRuntimeUse }
@@ -298,6 +315,7 @@ final class AppModel: ObservableObject {
     }
 
     func refreshSessions() {
+        syncAgentSessionRecords()
         sessionRefreshGeneration += 1
         let generation = sessionRefreshGeneration
         Task { [weak self] in
@@ -415,7 +433,9 @@ final class AppModel: ObservableObject {
     }
 
     func showNewChatHome(projectPath: String? = nil, quickChat: Bool = false) {
-        let currentNormalProjectPath = selectedController.flatMap { $0.isQuickChat ? nil : $0.projectPath }
+        let currentNormalProjectPath = selectedController.flatMap {
+            $0.isQuickChat ? nil : $0.projectPath
+        }
         let targetPath = projectPath ?? currentNormalProjectPath ?? selectedProjectPath.flatMap { path in
             isQuickChatsProject(path) ? nil : path
         } ?? projects.first?.path
@@ -439,6 +459,7 @@ final class AppModel: ObservableObject {
             return
         }
 
+        clearAgentSelection()
         selectedControllerID = nil
         composingQuickChat = quickChat
         selectedProjectPath = quickChat ? PiPaths.quickChatsProject.path : targetPath
@@ -449,8 +470,10 @@ final class AppModel: ObservableObject {
 
     func prepareLandingDraft() {
         guard selectedControllerID == nil, let selectedProjectPath else { return }
-        let quickChat = composingQuickChat || isQuickChatsProject(selectedProjectPath)
+        let landingAgent = selectedAgentID.flatMap(agent(withID:))
+        let quickChat = landingAgent == nil && (composingQuickChat || isQuickChatsProject(selectedProjectPath))
         if let existing = landingDraftController,
+           existing.agentID == landingAgent?.id,
            existing.projectPath == selectedProjectPath,
            existing.isQuickChat == quickChat {
             loadLandingSlashCommands(for: existing)
@@ -463,15 +486,17 @@ final class AppModel: ObservableObject {
             sessionPath: nil,
             title: quickChat ? "Quick Chat" : "Untitled",
             messages: [],
-            kind: quickChat ? .quickChat : .persistent
+            kind: quickChat ? .quickChat : .persistent,
+            agentID: landingAgent?.id,
+            agentConfiguration: landingAgent.map { agent in { [weak self] in self?.agent(withID: agent.id) } }
         ) { [weak self] event in
             self?.handleControllerEvent(event)
         }
-        if let previous {
+        if let previous, previous.agentID == nil, landingAgent == nil {
             controller.setLandingResources(previous.chatResources)
             if let level = previous.explicitThinkingLevel { controller.setThinkingLevel(level) }
         }
-        pendingLandingModelSelection = previous?.explicitModelSelectionID.map { (controller.id, $0) }
+        pendingLandingModelSelection = (landingAgent == nil && previous?.agentID == nil ? previous?.explicitModelSelectionID : nil).map { (controller.id, $0) }
             ?? pendingLandingModelSelection.flatMap { pending in
                 // A previous transfer may still be waiting for the destination catalog.
                 previous?.id == pending.controllerID ? (controller.id, pending.modelID) : nil
@@ -508,6 +533,17 @@ final class AppModel: ObservableObject {
     }
 
     private func loadLandingSlashCommands(for controller: SessionController) {
+        if controller.agentID != nil {
+            // Use the actual saved draft runtime: custom extensions and commands must
+            // match the agent launch configuration, never an unsaved catalog probe.
+            guard !controller.hasCompleteModelCatalog, !controller.hasRuntimeOrStartup else { return }
+            Task { [weak self, weak controller] in
+                guard let self, let controller, self.landingDraftController === controller else { return }
+                do { try await controller.ensureRPC(reloadMessages: false) }
+                catch { controller.errorText = error.localizedDescription }
+            }
+            return
+        }
         let projectPath = controller.projectPath
         let additions = controller.chatResources
         let commandKey = LandingCommandKey(projectPath: projectPath, resourceIDs: additions.map(\.id).sorted())
@@ -582,7 +618,11 @@ final class AppModel: ObservableObject {
     }
 
     private func applyLandingModels(_ models: [ModelInfo], to controller: SessionController) {
-        let scoped = EnabledModelScope.scopedModels(models, projectPath: controller.projectPath)
+        var scoped = EnabledModelScope.scopedModels(models, projectPath: controller.projectPath)
+        if let preferredID = agent(for: controller)?.modelID,
+           let preferred = models.first(where: { $0.id == preferredID }), !scoped.contains(where: { $0.id == preferredID }) {
+            scoped.append(preferred)
+        }
         let currentSelection = controller.selectedModelID
         controller.models = scoped
         if let pending = pendingLandingModelSelection, pending.controllerID == controller.id,
@@ -604,17 +644,20 @@ final class AppModel: ObservableObject {
 
     func activateLandingDraft(_ controller: SessionController) {
         guard landingDraftController?.id == controller.id else { return }
+        clearAgentSelection()
         pendingLandingModelSelection = nil
         landingDraftText = ""
         landingDraftImages = []
         touchProject(controller.projectPath)
         controllers[controller.id] = controller
+        syncAgentSessionRecords()
         addControllerToInbox(controller)
         selectedProjectPath = controller.projectPath
         selectedControllerID = controller.id
         composingQuickChat = false
         finishedUnseenControllerIDs.remove(controller.id)
         landingDraftController = nil
+        reconcileControllerActivity()
     }
 
     func recentSessions(forProjectPath projectPath: String, limit: Int) -> [SessionSummary] {
@@ -667,7 +710,7 @@ final class AppModel: ObservableObject {
     func isQuickChatInboxItem(_ itemID: String) -> Bool {
         if let controller = inboxController(for: itemID) { return controller.isQuickChat }
         guard let summary = inboxSummary(for: itemID) else { return false }
-        return isQuickChatsProject(summary.projectPath)
+        return agentSessionRecords[AgentSessionStore.standardizedPath(summary.filePath)] == nil && isQuickChatsProject(summary.projectPath)
     }
 
     var canUndoInboxDismissal: Bool { inboxDismissalUndo != nil }
@@ -681,7 +724,9 @@ final class AppModel: ObservableObject {
         } else {
             removedIDs = [itemID]
         }
-        guard !removedIDs.contains(where: { inboxController(for: $0)?.showsActivityIndicator == true }) else {
+        guard !removedIDs.contains(where: {
+            inboxController(for: $0)?.showsActivityIndicator == true || inboxHermesController(for: $0)?.isWorking == true
+        }) else {
             statusLine = "A working session cannot be marked done."
             return
         }
@@ -697,10 +742,12 @@ final class AppModel: ObservableObject {
             let selectedIDs = Set([inboxID(for: controller), "controller:\(controller.id)"])
             return removedIDs.isDisjoint(with: selectedIDs) ? nil : controller.id
         }
-        let title = inboxController(for: itemID)?.title ?? inboxSummary(for: itemID)?.title ?? "Thread"
+        let removedSelectedHermesChatID = selectedHermesChatID.flatMap { removedIDs.contains("hermes:\($0)") ? $0 : nil }
+        let title = inboxHermesChat(for: itemID)?.title ?? inboxController(for: itemID)?.title ?? inboxSummary(for: itemID)?.title ?? "Thread"
         inboxDismissalUndo = InboxDismissalUndo(
             items: removedItems,
             selectedControllerID: removedSelectedControllerID,
+            selectedHermesChatID: removedSelectedHermesChatID,
             title: title.isEmpty ? "Untitled" : title
         )
         sessionInboxIDs.removeAll { removedIDs.contains($0) }
@@ -710,7 +757,13 @@ final class AppModel: ObservableObject {
             activeControllerIDs.remove(controller.id)
         }
 
-        if removedSelectedControllerID != nil {
+        for record in hermesChats where removedIDs.contains("hermes:\(record.id)") {
+            hermesControllers[record.id]?.stop()
+            hermesUnreadChatIDs.remove(record.id)
+        }
+
+        if removedSelectedControllerID != nil || removedSelectedHermesChatID != nil {
+            clearAgentSelection()
             selectedControllerID = nil
             composingQuickChat = false
             newChatHomeRequestID += 1
@@ -723,9 +776,13 @@ final class AppModel: ObservableObject {
             sessionInboxIDs.insert(item.id, at: min(item.index, sessionInboxIDs.endIndex))
         }
         if let controllerID = undo.selectedControllerID, let controller = controllers[controllerID] {
+            clearAgentSelection()
             selectedControllerID = controllerID
             selectedProjectPath = controller.projectPath
             composingQuickChat = false
+        }
+        if let chatID = undo.selectedHermesChatID, let chat = hermesChats.first(where: { $0.id == chatID }) {
+            selectHermesChat(agentID: chat.agentID, chatID: chatID)
         }
         inboxDismissalUndo = nil
         statusLine = "Restored: \(undo.title)"
@@ -759,6 +816,7 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func newSession(projectPath: String, extensionPaths: [String] = [], initialMessage: String? = nil) -> SessionController {
+        clearAgentSelection()
         landingDraftController?.stopRPC()
         landingDraftController = nil
         touchProject(projectPath)
@@ -800,6 +858,7 @@ final class AppModel: ObservableObject {
     }
 
     func newQuickChat(extensionPaths: [String] = [], initialMessage: String? = nil) {
+        clearAgentSelection()
         landingDraftController?.stopRPC()
         landingDraftController = nil
         Task { [weak self] in
@@ -822,6 +881,7 @@ final class AppModel: ObservableObject {
             ) { [weak self] event in
                 self?.handleControllerEvent(event)
             }
+            self.clearAgentSelection()
             self.controllers[controller.id] = controller
             self.selectedProjectPath = projectPath
             self.composingQuickChat = false
@@ -873,6 +933,7 @@ final class AppModel: ObservableObject {
     }
 
     private func select(_ controller: SessionController) {
+        clearAgentSelection()
         controller.resumeRuntimeLoading()
         touchProject(controller.projectPath)
         selectedProjectPath = controller.projectPath
@@ -893,12 +954,16 @@ final class AppModel: ObservableObject {
     /// disk. The caller selects it; the transcript is applied only if it is
     /// still selected when parsing finishes.
     private func makeController(for summary: SessionSummary) -> SessionController {
+        let owner = agent(forSessionPath: summary.filePath)
+        let recorded = agentSessionRecords[AgentSessionStore.standardizedPath(summary.filePath)] != nil
         let controller = SessionController(
             projectPath: summary.projectPath,
             sessionPath: summary.filePath,
             title: summary.title,
             messages: [],
-            kind: isQuickChatsProject(summary.projectPath) ? .quickChat : .persistent
+            kind: !recorded && isQuickChatsProject(summary.projectPath) ? .quickChat : .persistent,
+            agentID: owner?.id,
+            agentConfiguration: owner.map { agent in { [weak self] in self?.agent(withID: agent.id) } }
         ) { [weak self] event in
             self?.handleControllerEvent(event)
         }
@@ -914,6 +979,7 @@ final class AppModel: ObservableObject {
     }
 
     private func prepareToOpen(_ summary: SessionSummary) {
+        clearAgentSelection()
         touchProject(summary.projectPath)
         selectedProjectPath = summary.projectPath
         composingQuickChat = false
@@ -1142,6 +1208,9 @@ final class AppModel: ObservableObject {
                 self.sessionInboxIDs.removeAll { $0 == deletedInboxID || self.inboxParentID(for: $0) == deletedInboxID }
                 self.sessionsByProject[request.projectPath]?.removeAll { $0.filePath == request.filePath }
                 self.archivedSessionsByProject[request.projectPath]?.removeAll { $0.filePath == request.filePath }
+                for id in self.agentRecentSessions.keys {
+                    self.agentRecentSessions[id]?.removeAll { $0.filePath == request.filePath }
+                }
                 let title = request.title.isEmpty ? "Untitled" : request.title
                 self.statusLine = fileExists ? "Moved to Trash: \(title)" : "Closed unsaved session: \(title)"
                 self.refreshSessions()
@@ -1319,6 +1388,9 @@ final class AppModel: ObservableObject {
         for controller in controllers.values {
             controller.stopRPC()
         }
+        landingDraftController?.stopRPC()
+        hermesLandingDraftController?.stop()
+        for controller in hermesControllers.values { controller.stop() }
     }
 
     func runCustomAction(_ action: CustomAction) {
@@ -1449,7 +1521,15 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    private func appendInboxID(_ itemID: String) {
+    func removeHermesInboxItem(_ chatID: String) {
+        let itemID = "hermes:\(chatID)"
+        sessionInboxIDs.removeAll { $0 == itemID }
+        if inboxDismissalUndo?.items.contains(where: { $0.id == itemID }) == true {
+            inboxDismissalUndo = nil
+        }
+    }
+
+    func appendInboxID(_ itemID: String) {
         guard !sessionInboxIDs.contains(itemID) else { return }
         sessionInboxIDs.append(itemID)
     }
@@ -1496,7 +1576,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func handleControllerEvent(_ event: SessionController.Event) {
+    /// Shared event sink for ordinary and agent pi controllers.
+    func handleControllerEvent(_ event: SessionController.Event) {
+        syncAgentSessionRecords()
         switch event {
         case .sessionFileChanged:
             for controller in controllers.values { syncControllerInboxID(controller) }
@@ -1588,8 +1670,9 @@ final class AppModel: ObservableObject {
     private func notifyAgentFinished(controllerID: String) {
         guard notificationsEnabled, let controller = controllers[controllerID] else { return }
         let content = UNMutableNotificationContent()
-        content.title = "Agent finished"
-        content.subtitle = controller.projectName
+        let owner = agent(for: controller)
+        content.title = owner.map { "\($0.name) finished" } ?? "Agent finished"
+        content.subtitle = owner?.name ?? controller.projectName
         content.body = controller.title.isEmpty || controller.title == "Untitled" ? "A background session completed." : "\(controller.title) completed."
         content.sound = .default
         var userInfo: [AnyHashable: Any] = ["controllerID": controllerID]
@@ -1649,7 +1732,8 @@ final class AppModel: ObservableObject {
     }
 
     private func loadRegistry() async {
-        projects = sortedProjects(await ProjectRegistryStore.load(), grouped: sessionsByProject)
+        let stored = await ProjectRegistryStore.load()
+        projects = sortedProjects(stored, grouped: sessionsByProject)
     }
 
     private func loadPersistedInboxSummaries() async {
@@ -1659,6 +1743,16 @@ final class AppModel: ObservableObject {
         guard !grouped.isEmpty else { return }
         sessionsByProject = grouped
         projects = sortedProjects(projects, grouped: grouped)
+    }
+
+    /// Discard a landing draft, without stopping ordinary threads.
+    func prepareAgentSelection() {
+        clearAgentSelection()
+        landingDraftController?.stopRPC()
+        landingDraftController = nil
+        composingQuickChat = false
+        selectedProjectPath = nil
+        showingSessionTree = false
     }
 
     private func loadCustomActions() async {

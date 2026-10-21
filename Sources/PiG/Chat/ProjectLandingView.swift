@@ -14,59 +14,89 @@ struct ChatTabContent: View {
     var body: some View {
         VStack(spacing: 0) {
             if let controller {
-                ChatScrollView(controller: controller, theme: theme)
-                    .id(controller.id)
+                chatContent(controller)
+            } else if let chatID = model.selectedHermesChatID {
+                if let hermes = model.selectedHermesController {
+                    ChatScrollView(controller: hermes, theme: theme)
+                        .id(hermes.id)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    HermesComposerView(controller: hermes, draft: $draft)
+                        .id(hermes.id)
+                } else {
+                    VStack(spacing: 12) {
+                        Text(model.inboxHermesChat(for: "hermes:\(chatID)")?.title ?? "Hermes chat")
+                            .font(AppFonts.heading(24, weight: .semibold))
+                        Text("This Hermes agent was removed. The local chat is retained, but cannot reconnect. You can delete its local data from the sidebar.")
+                            .font(AppFonts.ui(13.5))
+                            .foregroundStyle(appTheme.muted)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(24)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // Chat errors surface via the single arbitrated toast in
-                // RootView plus the 'Last error' affordance near the composer.
-                ExtensionWidgetsView(widgets: widgets(for: controller, placement: .aboveEditor))
-                ExtensionStatusView(statuses: controller.extensionUIStatuses)
-                if !controller.chatResources.isEmpty {
-                    ChatResourceChips(items: controller.chatResources)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 6)
                 }
-                ComposerView(controller: controller, draft: $draft, imageAttachments: $imageAttachments)
-                ExtensionWidgetsView(widgets: widgets(for: controller, placement: .belowEditor))
-                    .padding(.top, -10)
+            } else if let agent = model.selectedAgent {
+                AgentLandingView(agent: agent)
+                    .id(agent.id)
             } else if let selectedProjectPath {
                 ProjectLandingView(projectPath: selectedProjectPath)
                     .id("\(selectedProjectPath)|\(model.newChatHomeRequestID)")
             } else {
-                VStack(spacing: 14) {
-                    Image(systemName: "terminal")
-                        .font(AppFonts.ui(42, weight: .light))
-                        .foregroundStyle(appTheme.brass)
-                    Text("Select or create a session")
-                        .font(AppFonts.heading(24, weight: .semibold))
-                        .foregroundStyle(appTheme.text)
-                    Text("Open a project from the sidebar, or start here.")
-                        .font(AppFonts.ui(13.5))
-                        .foregroundStyle(appTheme.muted)
-                    HStack(spacing: 10) {
-                        Button {
-                            model.showNewChatHome(quickChat: true)
-                        } label: {
-                            Label("New Quick Chat", systemImage: "bubble.left.and.bubble.right")
-                        }
-                        .buttonStyle(ProjectLandingPrimaryButtonStyle())
-                        Button {
-                            model.addExistingProject()
-                        } label: {
-                            Label("Add Project", systemImage: "folder.badge.plus")
-                        }
-                        .buttonStyle(ProjectLandingSecondaryButtonStyle())
-                    }
-                    .padding(.top, 6)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                emptyContent
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background {
-            ExtensionWindowTitleView(title: controller?.extensionWindowTitle ?? controller?.title ?? "PiG")
+            ExtensionWindowTitleView(title: controller?.extensionWindowTitle ?? controller?.title ?? model.selectedAgent?.name ?? "PiG")
                 .frame(width: 0, height: 0)
         }
+    }
+
+    @ViewBuilder private func chatContent(_ controller: SessionController) -> some View {
+        ChatScrollView(controller: controller, theme: theme)
+            .id(controller.id)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Chat errors surface via the single arbitrated toast in
+        // RootView plus the 'Last error' affordance near the composer.
+        ExtensionWidgetsView(widgets: widgets(for: controller, placement: .aboveEditor))
+        ExtensionStatusView(statuses: controller.extensionUIStatuses)
+        if !controller.chatResources.isEmpty {
+            ChatResourceChips(items: controller.chatResources)
+                .padding(.horizontal, 20)
+                .padding(.top, 6)
+        }
+        ComposerView(controller: controller, draft: $draft, imageAttachments: $imageAttachments)
+        ExtensionWidgetsView(widgets: widgets(for: controller, placement: .belowEditor))
+            .padding(.top, -10)
+    }
+
+    private var emptyContent: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "terminal")
+                .font(AppFonts.ui(42, weight: .light))
+                .foregroundStyle(appTheme.brass)
+            Text("Select or create a session")
+                .font(AppFonts.heading(24, weight: .semibold))
+                .foregroundStyle(appTheme.text)
+            Text("Open a project from the sidebar, or start here.")
+                .font(AppFonts.ui(13.5))
+                .foregroundStyle(appTheme.muted)
+            HStack(spacing: 10) {
+                Button {
+                    model.showNewChatHome(quickChat: true)
+                } label: {
+                    Label("New Quick Chat", systemImage: "bubble.left.and.bubble.right")
+                }
+                .buttonStyle(ProjectLandingPrimaryButtonStyle())
+                Button {
+                    model.addExistingProject()
+                } label: {
+                    Label("Add Project", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(ProjectLandingSecondaryButtonStyle())
+            }
+            .padding(.top, 6)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func widgets(for controller: SessionController, placement: ExtensionUIWidget.Placement) -> [ExtensionUIWidget] {
@@ -138,9 +168,9 @@ private struct ProjectLandingView: View {
                 .buttonStyle(.plain)
                 .popover(isPresented: $projectMenuOpen, arrowEdge: .bottom) {
                     ProjectPickerMenu(
-                        width: 300,
+                        width: 620,
                         showsQuickChat: true,
-                        isSelected: { !model.composingQuickChat && $0.path == projectPath },
+                        isSelected: { model.selectedAgent == nil && !model.composingQuickChat && $0.path == projectPath },
                         selectProject: { model.showNewChatHome(projectPath: $0) },
                         quickChatSelected: model.composingQuickChat,
                         selectQuickChat: { model.showNewChatHome(quickChat: true) },

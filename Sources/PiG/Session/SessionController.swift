@@ -34,6 +34,9 @@ final class SessionController: ObservableObject, Identifiable {
     let id = UUID().uuidString
     let projectPath: String
     let kind: SessionKind
+    /// Stable owner even before pi has written a session file.
+    private(set) var agentID: String?
+    private var agentConfiguration: (() -> Agent?)?
     @Published var sessionPath: String? {
         didSet {
             if sessionPath != oldValue {
@@ -71,10 +74,21 @@ final class SessionController: ObservableObject, Identifiable {
     @Published var isCompacting = false
     @Published var errorText: String? {
         didSet {
+            errorID = UUID()
+            errorSource = errorText == Self.liveUpdatesUnavailableNotice ? .liveUpdates : .other
+            retryErrorID = nil
             if errorText != oldValue { dismissedErrorToast = nil }
         }
     }
     @Published var dismissedErrorToast: String?
+
+    private enum ErrorSource {
+        case other, assistant, liveUpdates
+    }
+
+    private var errorID = UUID()
+    private var errorSource: ErrorSource = .other
+    private var retryErrorID: UUID?
     private var recentExtensionNotices: [String: Date] = [:]
     @Published var sessionTree: SessionTreeSnapshot?
     @Published var sessionTreeLoadState: SessionTreeLoadState = .idle
@@ -133,6 +147,7 @@ final class SessionController: ObservableObject, Identifiable {
     private var rpcStartupRevision = 0
     private var runtimeLoadingSuspended = false
     private var quickChatClosed = false
+    private var isStartingNewChat = false
     private let closedQuickChatNotice = "This quick chat is closed. Its transcript is read-only because its unsaved agent context was unloaded. Start a new quick chat to continue."
     private var streamingAccumulator: StreamingAssistantAccumulator?
     private var streamingAccumulatorNeedsSnapshot = false
@@ -172,10 +187,14 @@ final class SessionController: ObservableObject, Identifiable {
         kind: SessionKind = .persistent,
         extensionPaths: [String] = [],
         recoveryRequests: SessionRecoveryRequests? = nil,
+        agentID: String? = nil,
+        agentConfiguration: (() -> Agent?)? = nil,
         eventHandler: @escaping (Event) -> Void
     ) {
         self.projectPath = projectPath
-        self.kind = kind
+        self.kind = agentID == nil ? kind : .persistent
+        self.agentID = agentID
+        self.agentConfiguration = agentConfiguration
         self.sessionPath = sessionPath
         self.title = title
         self.messages = messages
@@ -184,10 +203,17 @@ final class SessionController: ObservableObject, Identifiable {
         self.eventHandler = eventHandler
         self.createdAsNewSession = sessionPath == nil && messages.isEmpty
         if self.createdAsNewSession {
-            self.selectedModelID = DefaultModelSchedule.effectiveModelID() ?? ""
-            self.thinkingLevel = GlobalThinkingSelection.level
+            self.selectedModelID = agentConfiguration?()?.modelID ?? DefaultModelSchedule.effectiveModelID() ?? ""
+            self.thinkingLevel = agentConfiguration?()?.thinking ?? GlobalThinkingSelection.level
         }
         Task { [weak self] in await self?.loadConfiguredModels() }
+    }
+
+    /// Removing an agent keeps the live thread and saved transcript as a plain session.
+    func removeAgentConfiguration() {
+        agentID = nil
+        agentConfiguration = nil
+        launchResources = PiLaunchResources(items: chatResources)
     }
 
     // Draft additions are editable only until the first RPC startup (including failed starts).
@@ -215,6 +241,7 @@ final class SessionController: ObservableObject, Identifiable {
     }
 
     func loadSessionTree(force: Bool = false) async {
+        guard agentID == nil else { addSystemNotice("Agent chats do not support branching."); return }
         if !force, sessionTree != nil { return }
         sessionTreeLoadState = .loading
         do {
@@ -234,6 +261,7 @@ final class SessionController: ObservableObject, Identifiable {
     }
 
     func forkFromTree(entryID: String) async -> Bool {
+        guard agentID == nil else { addSystemNotice("Agent chats do not support branching."); return false }
         guard !isForking else { return false }
         guard isAgentSettled && !showsActivityIndicator else {
             errorText = "Wait for the agent to settle before forking."
@@ -511,6 +539,7 @@ final class SessionController: ObservableObject, Identifiable {
     func send(_ rawText: String, images: [ImageAttachment] = [], requestFollowUp: Bool = false) async -> Bool {
         let text = rawText.nonEmptyTrimmed ?? ""
         guard !text.isEmpty || !images.isEmpty else { return false }
+        guard !isStartingNewChat else { errorText = "A new chat is starting. Try again in a moment."; return false }
         guard !quickChatClosed else {
             errorText = closedQuickChatNotice
             return false
@@ -578,7 +607,7 @@ final class SessionController: ObservableObject, Identifiable {
         composerDraft: String? = nil
     ) async -> Bool {
         let text = rawText.nonEmptyTrimmed ?? ""
-        guard !isSendingPrompt, !text.isEmpty || !images.isEmpty else { return false }
+        guard !isStartingNewChat, !isSendingPrompt, !text.isEmpty || !images.isEmpty else { return false }
         isSendingPrompt = true
         defer { isSendingPrompt = false }
         let isQueueing = forceQueue || showsActivityIndicator
@@ -636,6 +665,7 @@ final class SessionController: ObservableObject, Identifiable {
                 requestAutomaticSessionTitle(for: prepared.displayText, replacing: fallbackTitle)
             }
             await refreshState()
+            if agentID != nil { eventHandler(.sessionsChanged) }
             return true
         } catch {
             eventHandler(.log(error.localizedDescription))
@@ -796,6 +826,10 @@ final class SessionController: ObservableObject, Identifiable {
     ]
 
     private func executeBuiltinSlashCommand(name: String, arguments args: String) async -> Bool {
+        if agentID != nil, ["fork", "clone", "tree"].contains(name) {
+            addSystemNotice("Agent chats do not support branching. Use /new for a fresh chat.")
+            return true
+        }
         if let notice = Self.builtinNotices[name] {
             addSystemNotice(notice)
             return true
@@ -1049,9 +1083,18 @@ final class SessionController: ObservableObject, Identifiable {
     }
 
     private func handleNewSlash() async -> Bool {
-        await withSlashRPC { rpc in
+        guard !isStartingNewChat else { return false }
+        if agentID != nil, showsActivityIndicator || isSendingPrompt {
+            addSystemNotice("Wait for the agent to finish before starting a new chat.")
+            return false
+        }
+        isStartingNewChat = true
+        defer { isStartingNewChat = false }
+        return await withSlashRPC { rpc in
             var command: [String: Any] = ["type": "new_session"]
-            if let sessionPath { command["parentSession"] = sessionPath }
+            // Agent chats cannot open the tree, so /new starts an independent
+            // thread rather than a child that would only be reachable through it.
+            if agentID == nil, let sessionPath { command["parentSession"] = sessionPath }
             let response = try await rpc.command(command)
             if let data = response["data"] as? [String: Any], data["cancelled"] as? Bool == true {
                 addSystemNotice("New session cancelled by extension.")
@@ -1062,7 +1105,30 @@ final class SessionController: ObservableObject, Identifiable {
             sessionTree = nil
             sessionTreeLoadState = .idle
             title = "Untitled"
+            automaticTitleTask?.cancel()
+            automaticTitleRequestID = nil
+            automaticTitleGenerationStarted = false
+            if agentID != nil {
+                hasExplicitModelSelection = false
+                hasExplicitThinkingSelection = false
+                // Changes to persona/skills/extensions take effect on /new as well as /reload.
+                let nextResources = agentConfiguration?().map { PiLaunchResources(agent: $0) }
+                do {
+                    if let nextResources, nextResources.arguments != launchResources.arguments {
+                        stopRPC()
+                        try await ensureRPC(reloadMessages: false)
+                    } else {
+                        try await applyAgentChatDefaults(using: rpc)
+                    }
+                } catch {
+                    // Never let a failed default selection silently start the next
+                    // turn on the preceding chat's model/thinking configuration.
+                    stopRPC()
+                    throw error
+                }
+            }
             await refreshState()
+            eventHandler(.sessionsChanged)
             bottomScrollRequest += 1
             addSystemNotice("New session started.")
             return true
@@ -1386,9 +1452,10 @@ final class SessionController: ObservableObject, Identifiable {
     }
 
     func refreshNewSessionDefaults() {
-        guard createdAsNewSession, sessionPath == nil, messages.isEmpty, !isProcessActive else { return }
-        if !hasExplicitModelSelection { selectedModelID = DefaultModelSchedule.effectiveModelID() ?? "" }
-        if !hasExplicitThinkingSelection { thinkingLevel = GlobalThinkingSelection.level }
+        guard createdAsNewSession || agentID != nil, sessionPath == nil,
+              messages.isEmpty || (agentID != nil && messages.allSatisfy { $0.role == .system }), !isProcessActive else { return }
+        if !hasExplicitModelSelection { selectedModelID = agentConfiguration?()?.modelID ?? DefaultModelSchedule.effectiveModelID() ?? "" }
+        if !hasExplicitThinkingSelection { thinkingLevel = agentConfiguration?()?.thinking ?? GlobalThinkingSelection.level }
     }
 
     func setModel(_ id: String) {
@@ -1462,9 +1529,17 @@ final class SessionController: ObservableObject, Identifiable {
         runtimeGeneration &+= 1
         recoveryTimerTask?.cancel()
         recoveryTimerTask = nil
-        let shouldApplyNewSessionDefaults = createdAsNewSession && sessionPath == nil && messages.isEmpty
+        // pi allocates a path before the first turn writes it. An unloaded empty
+        // agent chat must create another fresh session, not switch to a missing file.
+        if agentID != nil, let path = sessionPath, !FileManager.default.fileExists(atPath: path) { sessionPath = nil }
+        let emptyChat = messages.isEmpty || (agentID != nil && messages.allSatisfy { $0.role == .system })
+        let shouldApplyNewSessionDefaults = (createdAsNewSession || agentID != nil) && sessionPath == nil && emptyChat
         resetStreamingState()
         clearQueueState()
+        if let agent = agentConfiguration?() {
+            try FileManager.default.createDirectory(atPath: projectPath, withIntermediateDirectories: true)
+            launchResources = PiLaunchResources(agent: agent)
+        }
         let resources = try PiGBundledExtensions.addingTo(launchResources)
         let client = PiRPCClient(projectPath: projectPath, noSession: isQuickChat, launchResources: resources)
         client.onEvent = { [weak self, weak client] event in
@@ -1522,6 +1597,10 @@ final class SessionController: ObservableObject, Identifiable {
             if parsedModels.count == modelDicts.count {
                 let sorted = parsedModels.sorted { $0.displayName < $1.displayName }
                 models = EnabledModelScope.scopedModels(sorted, projectPath: projectPath)
+                if let preferredID = agentConfiguration?()?.modelID,
+                   let preferred = sorted.first(where: { $0.id == preferredID }), !models.contains(where: { $0.id == preferredID }) {
+                    models.append(preferred)
+                }
                 hasCompleteModelCatalog = true
             }
         }
@@ -1534,14 +1613,14 @@ final class SessionController: ObservableObject, Identifiable {
                 }
                 let preferredID = hasExplicitModelSelection
                     ? selectedModelID
-                    : (DefaultModelSchedule.effectiveModelID() ?? "")
+                    : (agentConfiguration?()?.modelID ?? DefaultModelSchedule.effectiveModelID() ?? "")
                 guard let model = models.first(where: { $0.id == preferredID }) else {
                     throw PiRPCClient.RPCError.commandFailed("The selected default model ‘\(preferredID)’ is unavailable or not configured. Choose a model in the composer or Settings → Models.")
                 }
                 _ = try await client.command(["type": "set_model", "provider": model.provider, "modelId": model.modelId])
                 try checkCurrentStartup()
                 selectedModelID = model.id
-                if !hasExplicitThinkingSelection { thinkingLevel = GlobalThinkingSelection.level }
+                if !hasExplicitThinkingSelection { thinkingLevel = agentConfiguration?()?.thinking ?? GlobalThinkingSelection.level }
                 _ = try await client.command(["type": "set_thinking_level", "level": thinkingLevel])
             } catch {
                 if rpc === client { stopRPC() }
@@ -1555,8 +1634,25 @@ final class SessionController: ObservableObject, Identifiable {
         try checkCurrentStartup()
     }
 
+    private func applyAgentChatDefaults(using client: PiRPCClient) async throws {
+        let preferredID = agentConfiguration?()?.modelID ?? DefaultModelSchedule.effectiveModelID() ?? ""
+        guard let model = models.first(where: { $0.id == preferredID }) else {
+            throw PiRPCClient.RPCError.commandFailed("The agent's default model is unavailable. Choose a model in the composer.")
+        }
+        _ = try await client.command(["type": "set_model", "provider": model.provider, "modelId": model.modelId])
+        selectedModelID = model.id
+        thinkingLevel = agentConfiguration?()?.thinking ?? GlobalThinkingSelection.level
+        _ = try await client.command(["type": "set_thinking_level", "level": thinkingLevel])
+    }
+
+    private func clearRecoveredError(_ source: ErrorSource, id: UUID) {
+        guard errorSource == source, errorID == id else { return }
+        errorText = nil
+    }
+
     func refreshState() async {
         guard let rpc, rpc.isRunning else { return }
+        let recoveringErrorID = errorID
         let wasActive = showsActivityIndicator
         if let stateResponse = try? await rpc.command(["type": "get_state"]),
            let data = stateResponse["data"] as? [String: Any] {
@@ -1564,6 +1660,7 @@ final class SessionController: ObservableObject, Identifiable {
             applyRecoveryMetadata(data)
             if let streaming = data["isStreaming"] as? Bool { isWorking = streaming }
             if let compacting = data["isCompacting"] as? Bool { isCompacting = compacting }
+            clearRecoveredError(.liveUpdates, id: recoveringErrorID)
         }
         if let statsResponse = try? await rpc.command(["type": "get_session_stats"]),
            let data = statsResponse["data"] as? [String: Any],
@@ -1585,6 +1682,7 @@ final class SessionController: ObservableObject, Identifiable {
 
         let revision = recoveryRevision
         let generation = runtimeGeneration
+        let recoveringErrorID = errorID
         do {
             let state = try await requestRecoveryState()
             guard recoverySnapshotIsCurrent(revision: revision, generation: generation) else { return }
@@ -1621,7 +1719,7 @@ final class SessionController: ObservableObject, Identifiable {
                 messages = recoveredMessages
                 bottomScrollRequest += 1
             }
-            if errorText == Self.liveUpdatesUnavailableNotice { errorText = nil }
+            clearRecoveredError(.liveUpdates, id: recoveringErrorID)
             if wasActive != showsActivityIndicator { eventHandler(.activityChanged) }
             if reportsFinished { eventHandler(.sessionsChanged) }
             updateRecoveryTimer()
@@ -1642,7 +1740,10 @@ final class SessionController: ObservableObject, Identifiable {
                     guard recoverySnapshotIsCurrent(revision: revision, generation: generation) else { return }
                 }
             }
-            errorText = Self.liveUpdatesUnavailableNotice
+            // A delayed timeout must not replace a newer or unrelated error.
+            if errorID == recoveringErrorID, errorText == nil || errorSource == .liveUpdates {
+                errorText = Self.liveUpdatesUnavailableNotice
+            }
             if let saved {
                 messages = saved
                 bottomScrollRequest += 1
@@ -1741,6 +1842,7 @@ final class SessionController: ObservableObject, Identifiable {
     }
 
     private func markRPCInactive() {
+        retryErrorID = nil
         recoveryRevision &+= 1
         runtimeGeneration &+= 1
         recoveryTimerTask?.cancel()
@@ -1762,6 +1864,20 @@ final class SessionController: ObservableObject, Identifiable {
         if type.hasPrefix("tool_execution_"), event["parentToolCallId"] != nil { return }
         recoveryRevision &+= 1
         defer { updateRecoveryTimer() }
+        switch type {
+        case "agent_start", "turn_start", "agent_end", "turn_end", "agent_settled",
+             "message_start", "message_update", "message_end", "queue_update",
+             "tool_execution_start", "tool_execution_update", "tool_execution_end",
+             "compaction_start", "compaction_end", "auto_retry_start", "auto_retry_end":
+            clearRecoveredError(.liveUpdates, id: errorID)
+        default:
+            break
+        }
+        if type == "auto_retry_start" {
+            // Bind recovery to this assistant error, not just matching display text.
+            retryErrorID = errorSource == .assistant && event["errorMessage"] as? String == errorText
+                ? errorID : nil
+        }
         switch type {
         case "agent_start", "turn_start", "auto_retry_start":
             // Routine retries stay quiet: the working indicator already
@@ -1837,10 +1953,13 @@ final class SessionController: ObservableObject, Identifiable {
             isCompacting = false
             eventHandler(.activityChanged)
         case "auto_retry_end":
-            if event["success"] as? Bool == false {
+            if event["success"] as? Bool == true, let retryErrorID {
+                clearRecoveredError(.assistant, id: retryErrorID)
+            } else if event["success"] as? Bool == false {
                 resetStreamingState()
                 isWorking = false
             }
+            retryErrorID = nil
             eventHandler(.activityChanged)
         case "agent_settled":
             finishStreamingReveal(immediate: false)
@@ -1895,7 +2014,13 @@ final class SessionController: ObservableObject, Identifiable {
             }
             final.id = id
             final.isStreaming = false
-            if let message = agent["errorMessage"] as? String, !message.isEmpty { errorText = message }
+            final.completedAt = Date()
+            if let message = agent["errorMessage"] as? String, !message.isEmpty {
+                errorText = message
+                errorSource = .assistant
+            }
+            // Some runtimes report retry success for any non-error stop, including aborts.
+            if agent["stopReason"] as? String == "aborted" { retryErrorID = nil }
             if let index = messages.firstIndex(where: { $0.id == id }) {
                 let reconciled = reconcileToolExecution(existing: messages[index].tools, authoritative: final.tools)
                 if messages[index].tools != reconciled {
@@ -2047,6 +2172,7 @@ final class SessionController: ObservableObject, Identifiable {
         next.role = target.role
         next.timestamp = target.timestamp ?? current.timestamp
         next.stopReason = target.stopReason
+        next.completedAt = target.completedAt ?? current.completedAt
         next.text = textReveal.value
         next.thinking = thinkingReveal.value
         next.images = target.images

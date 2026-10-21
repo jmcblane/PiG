@@ -4,7 +4,25 @@ struct SessionTreeToolbarButton: View {
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
 
+    /// Agent chats are linear: no tree, fork, or clone.
+    private var isAgentChat: Bool {
+        model.selectedAgent != nil || model.selectedController.map { model.agent(for: $0) != nil } == true
+    }
+
     var body: some View {
+        if isAgentChat {
+            // Keeps `/tree` from leaving the popover flag set while it can't be shown.
+            Color.clear
+                .frame(width: 0, height: 0)
+                .onChange(of: model.showingSessionTree, initial: true) { _, showing in
+                    if showing { model.showingSessionTree = false }
+                }
+        } else {
+            treeButton
+        }
+    }
+
+    private var treeButton: some View {
         Button {
             model.showingSessionTree.toggle()
         } label: {

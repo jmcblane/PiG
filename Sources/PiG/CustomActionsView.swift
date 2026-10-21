@@ -47,17 +47,17 @@ struct TitlebarCustomActionsInstaller: NSViewRepresentable {
 
         let controls = ThemedTitlebarSessionControls()
             .environmentObject(model)
-            .frame(width: 280, height: 20, alignment: .center)
+            .frame(width: 320, height: 20, alignment: .center)
         let hostingView = NSHostingView(rootView: controls)
         hostingView.identifier = identifier
         hostingView.translatesAutoresizingMaskIntoConstraints = false
-        hostingView.frame = NSRect(x: 0, y: 0, width: 280, height: 20)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 320, height: 20)
         titlebarView.addSubview(hostingView)
 
         NSLayoutConstraint.activate([
             hostingView.centerXAnchor.constraint(equalTo: titlebarView.centerXAnchor),
             hostingView.centerYAnchor.constraint(equalTo: titlebarView.centerYAnchor),
-            hostingView.widthAnchor.constraint(equalToConstant: 280),
+            hostingView.widthAnchor.constraint(equalToConstant: 320),
             hostingView.heightAnchor.constraint(equalToConstant: 20)
         ])
     }
@@ -156,7 +156,7 @@ struct TitlebarProjectControls: View {
     }
 }
 
-private struct TitlebarIconButtonStyle: ButtonStyle {
+struct TitlebarIconButtonStyle: ButtonStyle {
     @Environment(\.appTheme) private var appTheme
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -214,18 +214,24 @@ struct TitlebarSessionControls: View {
     }
 
     @State private var projectMenuOpen = false
-    var body: some View {
+    var body: some View { projectControls }
+
+    private var projectControls: some View {
         HStack(spacing: 6) {
             Button {
                 projectMenuOpen.toggle()
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "folder")
-                    Text(selectedTitle)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(AppFonts.ui(9, weight: .bold))
-                        .foregroundStyle(appTheme.muted)
+                    if let agent = model.selectedAgent {
+                        AgentAvatar(look: agent.look, size: 18)
+                        Text(agent.name).lineLimit(1)
+                    } else {
+                        Image(systemName: "folder")
+                        Text(selectedTitle).lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(AppFonts.ui(9, weight: .bold))
+                            .foregroundStyle(appTheme.muted)
+                    }
                 }
                 .font(AppFonts.ui(12.5, weight: .semibold))
                 .foregroundStyle(appTheme.text)
@@ -237,23 +243,25 @@ struct TitlebarSessionControls: View {
             .help("Select project")
             .popover(isPresented: $projectMenuOpen, arrowEdge: .bottom) {
                 ProjectPickerMenu(
-                    width: 250,
+                    width: 620,
                     showsPinButtons: true,
-                    isSelected: { model.selectedProjectPath == $0.path },
+                    isSelected: { model.selectedAgent == nil && model.selectedProjectPath == $0.path },
                     selectProject: { model.selectProject($0) },
                     dismiss: { projectMenuOpen = false }
                 )
             }
 
             Button {
-                if let path = model.selectedProject?.path {
+                if let agent = model.selectedAgent {
+                    model.selectAgent(agent.id)
+                } else if let path = model.selectedProject?.path {
                     model.showNewChatHome(projectPath: path)
                 }
             } label: {
                 Image(systemName: "square.and.pencil")
             }
             .buttonStyle(TitlebarIconButtonStyle())
-            .disabled(model.selectedProject == nil)
+            .disabled(model.selectedProject == nil && model.selectedAgent == nil)
             .help(model.sessionLaunchExtensions.isEmpty ? "New chat" : "New chat — right-click for session extensions")
             .contextMenu {
                 if let path = model.selectedProject?.path {

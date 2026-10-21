@@ -1197,6 +1197,8 @@ struct ChatMessage: Identifiable, Codable, Hashable, Sendable {
     var references: [MessageReference]
     var images: [ImageAttachment]
     var timestamp: Date?
+    /// When an assistant message finished (session entry time or live `message_end`).
+    var completedAt: Date?
     /// Provider completion reason for assistant messages (for example `toolUse` or `stop`).
     var stopReason: String?
     var isStreaming: Bool

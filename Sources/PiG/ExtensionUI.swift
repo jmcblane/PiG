@@ -193,7 +193,7 @@ struct ExtensionUIPromptView: View {
     }
 }
 
-private struct ExtensionPromptButtonStyle: ButtonStyle {
+struct ExtensionPromptButtonStyle: ButtonStyle {
     @Environment(\.appTheme) private var appTheme
 
     func makeBody(configuration: Configuration) -> some View {

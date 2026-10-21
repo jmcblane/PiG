@@ -379,7 +379,7 @@ enum MarkdownSelectableTextBuilder {
             var pieceColor = color
 
             if let link = run.link {
-                attrs[.link] = link
+                attrs[.link] = resolvedLink(link, projectPath: projectPath)
                 attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
                 pieceColor = palette.link.nsColor
             }
@@ -451,6 +451,16 @@ enum MarkdownSelectableTextBuilder {
         return (protectedText, items)
     }
 
+    private static func resolvedLink(_ link: URL, projectPath: String?) -> URL {
+        guard link.scheme == nil, link.host == nil, !link.path.isEmpty else { return link }
+        if link.path.hasPrefix("/") {
+            return URL(fileURLWithPath: link.path).standardizedFileURL
+        }
+        guard let projectPath else { return link }
+        let root = URL(fileURLWithPath: projectPath, isDirectory: true)
+        return URL(string: link.relativeString, relativeTo: root)?.absoluteURL.standardizedFileURL ?? link
+    }
+
     private static func resolvedPath(for token: ComposerToken, projectPath: String?) -> String? {
         switch token.kind {
         case .skill:
@@ -518,6 +528,44 @@ final class MarkdownTextView: NSTextView {
         let linkAttributes: [NSAttributedString.Key: Any] = [.cursor: NSCursor.pointingHand]
         view.linkTextAttributes = linkAttributes
         return view
+    }
+
+    override func clicked(onLink link: Any, at charIndex: Int) {
+        guard let url = (link as? URL) ?? (link as? String).flatMap({ URL(string: $0) }) else {
+            super.clicked(onLink: link, at: charIndex)
+            return
+        }
+        if url.scheme == nil, url.host == nil, !url.path.isEmpty {
+            showLinkError("This relative file link needs a chat project directory.")
+            return
+        }
+        guard url.isFileURL else {
+            super.clicked(onLink: link, at: charIndex)
+            return
+        }
+        // File links open documents, never commands. Do not send query strings
+        // or fragments to Launch Services as part of the local filename.
+        let fileURL = URL(fileURLWithPath: url.path).standardizedFileURL
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            showLinkError("The file does not exist:\n\(fileURL.path)")
+            return
+        }
+        if !NSWorkspace.shared.open(fileURL) {
+            showLinkError("macOS could not open:\n\(fileURL.path)")
+        }
+    }
+
+    private func showLinkError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Unable to Open File"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        if let window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     // Measured through this view's own layout manager, so the layout the

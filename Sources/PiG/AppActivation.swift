@@ -77,4 +77,27 @@ final class PiGAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
     ) {
         completionHandler([.banner, .list, .sound])
     }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let info = response.notification.request.content.userInfo
+        let agentID = info["agentID"] as? String
+        let hermesChatID = info["hermesChatID"] as? String
+        let controllerID = info["controllerID"] as? String
+        let sessionPath = info["sessionPath"] as? String
+        Task { @MainActor [weak self] in
+            guard let model = self?.model else { return }
+            var userInfo: [AnyHashable: Any] = [:]
+            userInfo["agentID"] = agentID
+            userInfo["hermesChatID"] = hermesChatID
+            userInfo["controllerID"] = controllerID
+            userInfo["sessionPath"] = sessionPath
+            await model.openNotification(userInfo)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        completionHandler()
+    }
 }

@@ -57,7 +57,7 @@ struct ComposerView: View {
                 if showsLandingResources {
                     SessionResourceStrip(controller: controller)
                 }
-                LastErrorAffordance(controller: controller)
+                LastErrorAffordance(error: controller.errorText) { controller.errorText = nil }
                 if !imageAttachments.isEmpty {
                     ComposerImageAttachmentsView(images: imageAttachments) { id in
                         imageAttachments.removeAll { $0.id == id }
@@ -251,7 +251,10 @@ struct ComposerView: View {
     }
 
     private var allSlashCommands: [SlashCommandInfo] {
-        (GUIBuiltinSlashCommands.commands + controller.slashCommands).reduce(into: [SlashCommandInfo]()) { result, command in
+        // Agent chats are linear, so branch commands aren't offered.
+        let hidden: Set<String> = model.agent(for: controller) != nil ? ["fork", "clone", "tree"] : []
+        return (GUIBuiltinSlashCommands.commands + controller.slashCommands).reduce(into: [SlashCommandInfo]()) { result, command in
+            guard !hidden.contains(command.name.lowercased()) else { return }
             if !result.contains(where: { $0.name.caseInsensitiveCompare(command.name) == .orderedSame }) { result.append(command) }
         }
     }
@@ -388,13 +391,14 @@ private struct ComposerImageAttachmentsView: View {
 /// available (selectable, copyable) after the transient toast is dismissed,
 /// without reintroducing a large persistent banner. Dismissing the toast
 /// never clears errorText; Clear here resolves it.
-private struct LastErrorAffordance: View {
+struct LastErrorAffordance: View {
     @Environment(\.appTheme) private var appTheme
-    @ObservedObject var controller: SessionController
+    let error: String?
+    let clear: () -> Void
     @State private var showingDetails = false
 
     var body: some View {
-        if let error = controller.errorText, !error.isEmpty {
+        if let error, !error.isEmpty {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(AppFonts.ui(10, weight: .semibold))
@@ -430,7 +434,7 @@ private struct LastErrorAffordance: View {
                                     NSPasteboard.general.clearContents()
                                     NSPasteboard.general.setString(error, forType: .string)
                                 }
-                                Button("Clear") { controller.errorText = nil }
+                                Button("Clear") { clear() }
                                 Spacer()
                                 Button("Close") { showingDetails = false }
                                     .keyboardShortcut(.cancelAction)

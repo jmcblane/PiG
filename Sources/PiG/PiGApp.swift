@@ -42,7 +42,11 @@ struct PiGApp: App {
             }
             CommandGroup(replacing: .newItem) {
                 Button("New Chat") {
-                    model.showNewChatHome()
+                    if let agent = model.selectedAgent {
+                        model.selectAgent(agent.id)
+                    } else {
+                        model.showNewChatHome()
+                    }
                 }
                 .keyboardShortcut("n", modifiers: .command)
             }
@@ -114,10 +118,21 @@ struct PiGApp: App {
                     .tabItem { Label("General", systemImage: "gearshape") }
                 ModelsSettingsView()
                     .tabItem { Label("Models", systemImage: "cpu") }
+                AgentsSettingsView()
+                    .tabItem { Label("Agents", systemImage: "person.2") }
             }
             .frame(width: 600, height: 680)
             .environmentObject(model)
+            .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textSizeStep: model.textSizeStep))
             .preferredColorScheme(model.selectedTheme.isLight ? .light : .dark)
+            .sheet(item: Binding(
+                get: { model.agentEditorInSettings ? model.agentEditorRequest : nil },
+                set: { model.agentEditorRequest = $0 }
+            )) { request in
+                AgentEditorView(request: request)
+                    .environmentObject(model)
+                    .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textSizeStep: model.textSizeStep))
+            }
         }
     }
 
