@@ -15,6 +15,7 @@ struct CastBar: View {
                 WindowDragArea()
                 HStack(spacing: 0) {
                     Color.clear.frame(width: 78)
+                    CastFilesButton()
                     CastRoomButton()
                     Spacer(minLength: 0)
                     CastTrailingControls()
@@ -56,9 +57,11 @@ private struct CastRoomButton: View {
                     Image(systemName: "bolt.fill")
                     Text("Quick chat")
                 } else {
-                    Image(systemName: "folder")
                     Text(model.selectedProject?.displayName ?? "Choose project")
                 }
+                Image(systemName: "chevron.down")
+                    .font(AppFonts.ui(8.5, weight: .bold))
+                    .foregroundStyle(appTheme.muted)
             }
             .font(AppFonts.ui(12.5, weight: .medium))
             .lineLimit(1)
@@ -80,6 +83,41 @@ private struct CastRoomButton: View {
                 selectQuickChat: { model.showNewChatHome(quickChat: true) },
                 dismiss: { open = false }
             )
+        }
+    }
+}
+
+/// Project files in a popover, replacing the sidebar's Files tab.
+private struct CastFilesButton: View {
+    @Environment(\.appTheme) private var appTheme
+    @EnvironmentObject private var model: AppModel
+    @State private var open = false
+
+    private var projectPath: String? { model.activeProjectPath ?? model.selectedProjectPath }
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            Image(systemName: open ? "folder.fill" : "folder")
+        }
+        .buttonStyle(TitlebarIconButtonStyle())
+        .disabled(projectPath == nil)
+        .help("Files")
+        .padding(.trailing, 4)
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            Group {
+                if let projectPath {
+                    FileTreeView(
+                        rootURL: URL(fileURLWithPath: projectPath, isDirectory: true),
+                        expanded: model.expandedDirectories(forProjectPath: projectPath),
+                        onExpandedChange: { model.setExpandedDirectories($0, forProjectPath: projectPath) }
+                    )
+                    .id(projectPath)
+                }
+            }
+            .frame(width: 360, height: 540)
+            .background(appTheme.panel)
+            .environmentObject(model)
+            .environment(\.appTheme, appTheme)
         }
     }
 }
