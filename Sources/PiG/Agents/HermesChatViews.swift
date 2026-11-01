@@ -159,7 +159,7 @@ private struct HermesModelPicker: View {
 
     var body: some View {
         Button { isOpen.toggle() } label: {
-            TabStripPickerLabel(value: controller.selectedModelID ?? "Server default", dot: appTheme.brass, hovering: hovering)
+            TabStripPickerLabel(value: controller.selectedModelID ?? "Server default", hovering: hovering)
         }
         .buttonStyle(.plain)
         .background(hovering ? Color.white.opacity(0.03) : Color.clear)

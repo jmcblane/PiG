@@ -132,7 +132,7 @@ struct ModelPickerMenu: View {
                 DispatchQueue.main.async { searchFocused = true }
             }
         } label: {
-            TabStripPickerLabel(value: value, dot: appTheme.brass, hovering: hovering)
+            TabStripPickerLabel(value: value, hovering: hovering)
         }
         .buttonStyle(.plain)
         .background(hovering ? Color.white.opacity(0.03) : Color.clear)
@@ -238,7 +238,6 @@ struct ModelPickerMenu: View {
 struct TabStripPickerLabel: View {
     @Environment(\.appTheme) private var appTheme
     let value: String
-    var dot: Color? = nil
     let hovering: Bool
 
     var body: some View {

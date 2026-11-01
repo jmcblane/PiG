@@ -6,27 +6,45 @@ import UniformTypeIdentifiers
 /// Replaces the sidebar inbox: each open chat is a face, ordered like the inbox.
 struct CastBar: View {
     static let height: CGFloat = 66
-    /// Space kept clear on each side of the cast for the room label and controls.
-    private let sideWidth: CGFloat = 230
+    @State private var leadingWidth: CGFloat = 230
+    @State private var trailingWidth: CGFloat = 230
 
     var body: some View {
         GeometryReader { geometry in
+            // The cast stays centered, so it gets twice the wider side's clearance.
+            let side = max(leadingWidth, trailingWidth) + 12
             ZStack(alignment: .top) {
                 WindowDragArea()
                 HStack(spacing: 0) {
-                    Color.clear.frame(width: 78)
-                    CastFilesButton()
-                    CastRoomButton()
+                    HStack(spacing: 0) {
+                        Color.clear.frame(width: 78)
+                        CastFilesButton()
+                        CastRoomButton()
+                    }
+                    .measureWidth { leadingWidth = $0 }
                     Spacer(minLength: 0)
                     CastTrailingControls()
+                        .padding(.trailing, 12)
+                        .measureWidth { trailingWidth = $0 }
                 }
                 .frame(height: 28)
-                .padding(.trailing, 12)
-                CastRow(width: max(120, geometry.size.width - sideWidth * 2))
+                CastRow(width: max(0, geometry.size.width - side * 2))
                     .padding(.top, 7)
             }
         }
         .frame(height: Self.height)
+    }
+}
+
+private struct WidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private extension View {
+    func measureWidth(_ update: @escaping (CGFloat) -> Void) -> some View {
+        background(GeometryReader { Color.clear.preference(key: WidthKey.self, value: $0.size.width) })
+            .onPreferenceChange(WidthKey.self, perform: update)
     }
 }
 
@@ -198,7 +216,7 @@ private struct CastRow: View {
     private func layout(_ entries: [CastEntry]) -> (visible: [CastEntry], overflow: [CastEntry]) {
         let total = entries.reduce(0) { $0 + $1.slotWidth }
         if total + Self.buttonSlot <= width { return (entries, []) }
-        var budget = width - Self.buttonSlot * 2
+        var budget = max(0, width - Self.buttonSlot * 2)
         var visible: [CastEntry] = []
         for entry in entries {
             guard entry.slotWidth <= budget else { break }
@@ -207,7 +225,7 @@ private struct CastRow: View {
         }
         if let selected = entries.first(where: { model.isInboxItemSelected($0.id) }), !visible.contains(selected) {
             while budget < selected.slotWidth, let last = visible.popLast() { budget += last.slotWidth }
-            visible.append(selected)
+            if budget >= selected.slotWidth { visible.append(selected) }
         }
         let shown = Set(visible.map(\.id))
         return (visible, entries.filter { !shown.contains($0.id) })
@@ -575,10 +593,58 @@ private struct CastOverflowButton: View {
                 .foregroundStyle(appTheme.secondaryText)
                 .frame(width: 36, height: 36)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(appTheme.panel2))
+                .overlay(alignment: .topTrailing) {
+                    // Each hidden chat draws its own dot in the same spot, so one shows if any needs you.
+                    ZStack {
+                        ForEach(entries) { CastAttentionProbe(itemID: $0.id) }
+                    }
+                    .offset(x: 4, y: -4)
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("More open chats")
+    }
+}
+
+/// A dot when an overflowed chat has a new reply or is waiting for input.
+private struct CastAttentionProbe: View {
+    @Environment(\.appTheme) private var appTheme
+    @EnvironmentObject private var model: AppModel
+    let itemID: String
+
+    var body: some View {
+        if let chat = model.inboxHermesChat(for: itemID) {
+            if let controller = model.hermesControllers[chat.id] {
+                HermesProbe(controller: controller, unread: model.hermesUnreadChatIDs.contains(chat.id))
+            } else if model.hermesUnreadChatIDs.contains(chat.id) {
+                CastDot(color: appTheme.good)
+            }
+        } else if let controller = model.inboxController(for: itemID) {
+            ControllerProbe(controller: controller, unread: model.finishedUnseen(controller))
+        } else if let summary = model.inboxSummary(for: itemID), model.finishedUnseen(forSessionPath: summary.filePath) {
+            CastDot(color: appTheme.good)
+        }
+    }
+
+    private struct HermesProbe: View {
+        @Environment(\.appTheme) private var appTheme
+        @ObservedObject var controller: HermesChatController
+        let unread: Bool
+        var body: some View {
+            if controller.approval != nil { CastDot(color: appTheme.brass) }
+            else if unread { CastDot(color: appTheme.good) }
+        }
+    }
+
+    private struct ControllerProbe: View {
+        @Environment(\.appTheme) private var appTheme
+        @ObservedObject var controller: SessionController
+        let unread: Bool
+        var body: some View {
+            if controller.extensionUIPrompt != nil { CastDot(color: appTheme.brass) }
+            else if unread { CastDot(color: appTheme.good) }
+        }
     }
 }
 
@@ -686,6 +752,24 @@ extension AppModel {
         return isQuickChatInboxItem(itemID) ? "Quick chat" : projectDisplayName(for: summary.projectPath)
     }
 
+    /// Status worth reading in a list: needs input, working, or a new reply.
+    func inboxItemStatusText(_ itemID: String) -> String? {
+        if let chat = inboxHermesChat(for: itemID) {
+            let controller = hermesControllers[chat.id]
+            if controller?.approval != nil { return "needs input" }
+            if controller?.isWorking == true { return "working" }
+            return hermesUnreadChatIDs.contains(chat.id) ? "new reply" : nil
+        }
+        if let controller = inboxController(for: itemID) {
+            if controller.extensionUIPrompt != nil { return "needs input" }
+            if controller.showsActivityIndicator { return "working" }
+            return finishedUnseen(controller) ? "new reply" : nil
+        }
+        guard let summary = inboxSummary(for: itemID) else { return nil }
+        if activeController(forSessionPath: summary.filePath) != nil { return "working" }
+        return finishedUnseen(forSessionPath: summary.filePath) ? "new reply" : nil
+    }
+
     func inboxItemLook(_ itemID: String) -> Look {
         if let chat = inboxHermesChat(for: itemID) {
             return hermesAgent(for: chat)?.look ?? Look.seeded(key: chat.id, projectPath: nil)
@@ -782,10 +866,15 @@ struct WindowDragArea: NSViewRepresentable {
     private final class DragView: NSView {
         override var mouseDownCanMoveWindow: Bool { true }
         override func mouseDown(with event: NSEvent) {
-            if event.clickCount == 2 {
-                window?.performZoom(nil)
-            } else {
+            guard event.clickCount == 2 else {
                 window?.performDrag(with: event)
+                return
+            }
+            // Follow System Settings › Desktop & Dock › "Double-click a window's title bar to".
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+            case "Minimize": window?.performMiniaturize(nil)
+            case "None": break
+            default: window?.performZoom(nil)
             }
         }
     }

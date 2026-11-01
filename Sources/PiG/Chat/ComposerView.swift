@@ -144,6 +144,9 @@ struct ComposerView: View {
         .onChange(of: controller.composerPrefillRequest) { _, request in
             applyComposerPrefill(request)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pigFocusComposer)) { _ in
+            focusRequest += 1
+        }
         .task(id: fileSuggestionQuery) {
             await refreshFileSuggestions()
         }

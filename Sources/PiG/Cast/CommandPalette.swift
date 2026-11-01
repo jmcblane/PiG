@@ -1,9 +1,12 @@
 import SwiftUI
 import AppKit
+import Combine
 
 extension Notification.Name {
     /// Opens the command palette; the object is an optional `PaletteScope` raw value.
     static let pigOpenPalette = Notification.Name("pigOpenPalette")
+    /// Asks the visible composer to take keyboard focus.
+    static let pigFocusComposer = Notification.Name("pigFocusComposer")
 }
 
 /// What the palette searches. Typing a scope's prefix and a colon (`file:`) narrows to it.
@@ -73,6 +76,8 @@ struct PaletteItem: Identifiable {
     var keywords = ""
     var fileURL: URL?
     var session: SessionSummary?
+    /// The palette ID this item would have as an open chat, used to skip duplicates.
+    var inboxKey = ""
     let perform: () -> Void
 }
 
@@ -88,6 +93,10 @@ struct CommandPalette: View {
     @State private var selection = 0
     @State private var fileMatches: [FileNode] = []
     @State private var fileSearch: Task<Void, Never>?
+    @State private var sessionCache: [PaletteItem] = []
+    /// Bumped when the composer's controller changes, so model results stay current.
+    @State private var controllerRevision = 0
+    @State private var keyMonitor: Any?
     @FocusState private var fieldFocused: Bool
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
@@ -97,7 +106,7 @@ struct CommandPalette: View {
         ZStack(alignment: .top) {
             Color.black.opacity(0.32)
                 .contentShape(Rectangle())
-                .onTapGesture(perform: dismiss)
+                .onTapGesture(perform: close)
             VStack(spacing: 0) {
                 field(results: results)
                 Rectangle().fill(appTheme.line.opacity(0.6)).frame(height: 1)
@@ -113,9 +122,22 @@ struct CommandPalette: View {
         .onAppear {
             scope = initialScope
             fieldFocused = true
+            sessionCache = buildSessionItems()
             if model.sessionArchiveLoadState == .idle { model.loadSessionArchive() }
+            // The text field consumes Delete before SwiftUI key handlers see it.
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard event.keyCode == 51, query.isEmpty, scope != .all else { return event }
+                scope = .all
+                return nil
+            }
         }
-        .onDisappear { fileSearch?.cancel() }
+        .onDisappear {
+            fileSearch?.cancel()
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        }
+        .onChange(of: initialScope) { _, newScope in scope = newScope }
+        .onChange(of: model.sessionArchiveLoadState) { _, _ in sessionCache = buildSessionItems() }
+        .onReceive(controllerChanges) { _ in controllerRevision += 1 }
         .onChange(of: query) { _, text in
             if let colon = text.firstIndex(of: ":"), let match = PaletteScope.matching(prefix: String(text[..<colon])) {
                 scope = match
@@ -156,12 +178,8 @@ struct CommandPalette: View {
                 .onSubmit { activate(results) }
                 .onKeyPress(.downArrow) { move(1, in: results); return .handled }
                 .onKeyPress(.upArrow) { move(-1, in: results); return .handled }
-                .onKeyPress(.escape) { dismiss(); return .handled }
-                .onKeyPress(.delete) {
-                    guard query.isEmpty, scope != .all else { return .ignored }
-                    scope = .all
-                    return .handled
-                }
+                .onKeyPress(.escape) { close(); return .handled }
+
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 15)
@@ -233,6 +251,28 @@ struct CommandPalette: View {
     private func run(_ item: PaletteItem) {
         dismiss()
         item.perform()
+        // Actions may open their own UI (settings, popovers); everything else returns to the composer.
+        if item.kind != .actions && item.kind != .projects { focusComposer() }
+    }
+
+    /// Closes without choosing anything.
+    private func close() {
+        dismiss()
+        focusComposer()
+    }
+
+    private func focusComposer() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .pigFocusComposer, object: nil)
+        }
+    }
+
+    /// Model results read the composer's controller, which AppModel does not republish.
+    private var controllerChanges: AnyPublisher<Void, Never> {
+        guard let controller = model.activeComposerController else { return Empty().eraseToAnyPublisher() }
+        return controller.objectWillChange
+            .throttle(for: .milliseconds(250), scheduler: RunLoop.main, latest: true)
+            .eraseToAnyPublisher()
     }
 
     // MARK: Results
@@ -278,40 +318,47 @@ struct CommandPalette: View {
             PaletteItem(
                 id: "chat:\(id)", kind: .chats,
                 title: model.inboxItemTitle(id),
-                subtitle: model.inboxItemSubtitle(id),
+                subtitle: [model.inboxItemSubtitle(id), model.inboxItemStatusText(id)].compactMap { $0 }.joined(separator: ", "),
                 icon: .look(model.inboxItemLook(id)),
                 checked: model.isInboxItemSelected(id)
             ) { model.selectInboxItem(id) }
         }
     }
 
+    /// Open chats already appear under chats, so mixed results skip them.
     private func sessionItems() -> [PaletteItem] {
-        let open = Set(model.sessionInboxIDs)
+        guard scope != .sessions else { return sessionCache }
+        let open = Set(model.sessionInboxIDs.map { "chat:\($0)" })
+        return sessionCache.filter { !open.contains($0.inboxKey) }
+    }
+
+    /// Every known session and Hermes chat, newest first. Built once per palette and
+    /// again when the archive finishes loading, not on each keystroke.
+    private func buildSessionItems() -> [PaletteItem] {
         var seen = Set<String>()
         let all = (model.sessionsByProject.values.flatMap { $0 } + model.archivedSessionsByProject.values.flatMap { $0 })
             .filter { seen.insert($0.filePath).inserted }
             .sorted { $0.timestamp > $1.timestamp }
-        let sessions = all.compactMap { summary -> PaletteItem? in
-            guard scope == .sessions || !open.contains(model.inboxID(forSessionPath: summary.filePath)) else { return nil }
+        let sessions = all.map { summary -> PaletteItem in
             let place = model.agent(forSessionPath: summary.filePath)?.name ?? model.projectDisplayName(for: summary.projectPath)
             return PaletteItem(
                 id: "session:\(summary.filePath)", kind: .sessions,
                 title: summary.title.isEmpty ? "Untitled" : summary.title,
                 subtitle: "\(place), \(summary.timestamp.formatted(.relative(presentation: .named)))",
                 icon: .look(model.sessionLook(summary)),
-                session: summary
+                session: summary,
+                inboxKey: "chat:\(model.inboxID(forSessionPath: summary.filePath))"
             ) { model.selectSession(summary) }
         }
-        let hermes = model.hermesChats
-            .filter { !open.contains("hermes:\($0.id)") || scope == .sessions }
-            .map { chat in
-                PaletteItem(
-                    id: "hermes:\(chat.id)", kind: .sessions,
-                    title: chat.title,
-                    subtitle: model.hermesAgent(for: chat)?.name ?? "Hermes",
-                    icon: .look(model.hermesAgent(for: chat)?.look ?? Look.seeded(key: chat.id, projectPath: nil))
-                ) { model.selectHermesChat(agentID: chat.agentID, chatID: chat.id) }
-            }
+        let hermes = model.hermesChats.map { chat in
+            PaletteItem(
+                id: "hermes:\(chat.id)", kind: .sessions,
+                title: chat.title,
+                subtitle: model.hermesAgent(for: chat)?.name ?? "Hermes",
+                icon: .look(model.hermesAgent(for: chat)?.look ?? Look.seeded(key: chat.id, projectPath: nil)),
+                inboxKey: "chat:hermes:\(chat.id)"
+            ) { model.selectHermesChat(agentID: chat.agentID, chatID: chat.id) }
+        }
         return sessions + hermes
     }
 
@@ -362,6 +409,7 @@ struct CommandPalette: View {
     }
 
     private func modelItems() -> [PaletteItem] {
+        _ = controllerRevision
         guard let controller = model.activeComposerController else { return [] }
         let quick = (1...5).map { UserDefaults.standard.string(forKey: QuickModelSlots.key($0)) ?? "" }
         let models = controller.models.map { info in
@@ -458,9 +506,10 @@ struct CommandPalette: View {
         fileSearch = Task {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
-            let matches = await Task.detached(priority: .userInitiated) {
+            let scan = Task.detached(priority: .userInitiated) {
                 FileTreeLoader.search(root: URL(fileURLWithPath: root), query: text, showHidden: false)
-            }.value
+            }
+            let matches = await withTaskCancellationHandler { await scan.value } onCancel: { scan.cancel() }
             guard !Task.isCancelled else { return }
             fileMatches = Array(matches.prefix(scope == .files ? 200 : 20))
         }
