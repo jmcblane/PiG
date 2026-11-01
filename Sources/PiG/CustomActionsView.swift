@@ -3,10 +3,11 @@ import AppKit
 
 struct TitlebarIconButtonStyle: ButtonStyle {
     @Environment(\.appTheme) private var appTheme
+    var active = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(AppFonts.ui(12.5, weight: .semibold))
-            .foregroundStyle(configuration.isPressed ? appTheme.brass : appTheme.text)
+            .foregroundStyle(configuration.isPressed || active ? appTheme.brass : appTheme.text)
             .frame(width: 24, height: 20)
             .background(configuration.isPressed ? appTheme.panel2.opacity(0.9) : Color.clear)
             .contentShape(Rectangle())

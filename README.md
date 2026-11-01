@@ -20,7 +20,7 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 
 ### Projects & sessions
 
-- Open chats sit in the top bar as a row of pixel faces: drag to reorder, right-click to mark done, rename, or unload
+- Open chats in a list on the left with a pixel folder per project (or the agent's face), title, and status; swipe to mark done, drag to reorder, ⌘S to hide
 - ⌘K palette for open chats, all sessions (including the archive), agents, projects, files, models, and actions
 - Project files in a popover from the top bar
 - Project home page listing recent sessions
@@ -35,7 +35,7 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 
 - Create reusable pi agents with your choice of model, extensions, and skills. Selected skills are automatically included in context for every chat.
 - Connect local or remote Hermes agents and chat with them in PiG.
-- Switch between agents and projects in the picker; agent chats join the top bar with the agent's face.
+- Switch between agents and projects in the picker; agent chats show the agent's face in the open-chats list.
 
 ### Chat & composer
 

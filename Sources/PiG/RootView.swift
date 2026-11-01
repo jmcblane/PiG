@@ -7,6 +7,7 @@ struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @State private var renameText = ""
     @State private var paletteScope: PaletteScope?
+    @AppStorage(InboxColumn.visibilityKey) private var inboxVisible = true
 
     var body: some View {
         GeometryReader { geometry in
@@ -15,7 +16,14 @@ struct RootView: View {
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
                     CastBar()
-                    ChatPaneView(controller: model.selectedController)
+                    HStack(spacing: 0) {
+                        if inboxVisible {
+                            InboxColumn()
+                                .transition(.move(edge: .leading))
+                        }
+                        ChatPaneView(controller: model.selectedController)
+                    }
+                    .clipped()
                 }
                 .frame(width: size.width, height: size.height)
 
