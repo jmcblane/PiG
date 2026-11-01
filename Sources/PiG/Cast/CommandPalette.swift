@@ -72,6 +72,7 @@ struct PaletteItem: Identifiable {
     var shortcut: String?
     var keywords = ""
     var fileURL: URL?
+    var session: SessionSummary?
     let perform: () -> Void
 }
 
@@ -182,7 +183,7 @@ struct CommandPalette: View {
                                 .id(item.id)
                                 .onHover { if $0 { selection = index } }
                                 .onTapGesture { run(item) }
-                                .contextMenu { fileMenu(item) }
+                                .contextMenu { itemMenu(item) }
                         }
                     }
                     .padding(6)
@@ -197,8 +198,10 @@ struct CommandPalette: View {
         }
     }
 
-    @ViewBuilder private func fileMenu(_ item: PaletteItem) -> some View {
-        if let url = item.fileURL {
+    @ViewBuilder private func itemMenu(_ item: PaletteItem) -> some View {
+        if let summary = item.session {
+            SessionSummaryContextMenu(summary: summary)
+        } else if let url = item.fileURL {
             Button("Open") { NSWorkspace.shared.open(url); dismiss() }
             Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]); dismiss() }
             Button("Open in Terminal") {
@@ -295,7 +298,8 @@ struct CommandPalette: View {
                 id: "session:\(summary.filePath)", kind: .sessions,
                 title: summary.title.isEmpty ? "Untitled" : summary.title,
                 subtitle: "\(place), \(summary.timestamp.formatted(.relative(presentation: .named)))",
-                icon: .look(model.sessionLook(summary))
+                icon: .look(model.sessionLook(summary)),
+                session: summary
             ) { model.selectSession(summary) }
         }
         let hermes = model.hermesChats
@@ -416,6 +420,10 @@ struct CommandPalette: View {
         add("resources", "Extensions & Resources", "puzzlepiece.extension", keywords: "skills") { model.showingPiResources = true }
         add("thinking-traces", model.showThinkingTraces ? "Hide Thinking Traces" : "Show Thinking Traces", "text.bubble") {
             model.showThinkingTraces.toggle()
+        }
+        add("refresh-sessions", "Refresh Sessions", "arrow.triangle.2.circlepath", keywords: "rescan reload list") {
+            model.refreshSessions()
+            model.loadSessionArchive()
         }
         add("reload-idle", "Reload All Idle Session Runtimes", "arrow.clockwise") { model.reloadAllIdleSessionRuntimes() }
         add("unload-idle", "Unload All Idle Sessions", "moon.zzz") { model.unloadAllIdleSessions() }

@@ -75,19 +75,12 @@ final class AppModel: ObservableObject {
     @Published var landingDraftText = ""
     @Published var landingDraftImages: [ImageAttachment] = []
     private var pendingLandingModelSelection: (controllerID: String, modelID: String)?
-    @Published var sidebarVisible: Bool = SidebarPreference.visible {
-        didSet { SidebarPreference.visible = sidebarVisible }
-    }
     @Published var composerFocusAccent: Bool = ComposerFocusAccentPreference.enabled {
         didSet { ComposerFocusAccentPreference.enabled = composerFocusAccent }
     }
     @Published var showThinkingTraces: Bool = ThinkingTracePreference.enabled {
         didSet { ThinkingTracePreference.enabled = showThinkingTraces }
     }
-    @Published var projectHeaderStyle: ProjectHeaderStyle = ProjectHeaderStyle.stored {
-        didSet { ProjectHeaderStyle.stored = projectHeaderStyle }
-    }
-    @Published var sidebarMode: SidebarMode = .sessions
     private var fileTreeExpandedByProject: [String: Set<String>] = [:]
     @Published var showingPiResources: Bool = false
     @Published var showingSessionTree: Bool = false
@@ -174,12 +167,6 @@ final class AppModel: ObservableObject {
 
     private let idleUnloadInterval: TimeInterval = 30 * 60
     private let maxLoadedIdleSessions = 3
-
-    enum SidebarMode: String, CaseIterable, Identifiable {
-        case sessions = "Sessions"
-        case files = "Files"
-        var id: String { rawValue }
-    }
 
     var selectedController: SessionController? {
         guard let selectedControllerID else { return nil }

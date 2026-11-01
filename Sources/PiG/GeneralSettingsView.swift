@@ -32,12 +32,6 @@ struct GeneralSettingsView: View {
                             .disabled(model.textSizeStep == TextSizePreference.actualSizeStep)
                     }
                 }
-
-                Picker("Project headers", selection: $model.projectHeaderStyle) {
-                    ForEach(ProjectHeaderStyle.allCases) { style in
-                        Text(style.displayName).tag(style)
-                    }
-                }
             }
 
             Section("Sessions") {

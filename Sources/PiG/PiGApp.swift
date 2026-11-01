@@ -50,8 +50,9 @@ struct PiGApp: App {
                 .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(after: .toolbar) {
-                Toggle("Show Sidebar", isOn: $model.sidebarVisible)
-                    .keyboardShortcut("s", modifiers: .command)
+                Button("Reopen Last Done Chat") { model.undoLastInboxDismissal() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(!model.canUndoInboxDismissal)
                 Button("New Quick Chat") {
                     model.showNewChatHome(quickChat: true)
                 }

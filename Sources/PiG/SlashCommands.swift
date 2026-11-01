@@ -106,7 +106,7 @@ enum GUIBuiltinSlashCommands {
         command("refresh", "Refresh state, models, stats, and commands"),
         command("clear-error", "Clear the visible error"),
         command("hotkeys", "Show GUI keyboard shortcuts"),
-        command("resume", "Use the sidebar session list"),
+        command("resume", "Find a session with ⌘F"),
         command("tree", "Show the in-session tree and fork points"),
         command("scoped-models", "Use model picker; scoped model UI is TUI-only"),
         command("trust", "PiG automatically trusts explicitly added or created projects; discovered projects are not bulk-trusted."),

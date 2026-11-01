@@ -26,7 +26,7 @@ struct ChatTabContent: View {
                     VStack(spacing: 12) {
                         Text(model.inboxHermesChat(for: "hermes:\(chatID)")?.title ?? "Hermes chat")
                             .font(AppFonts.heading(24, weight: .semibold))
-                        Text("This Hermes agent was removed. The local chat is retained, but cannot reconnect. You can delete its local data from the sidebar.")
+                        Text("This Hermes agent was removed. The local chat is retained, but cannot reconnect. Right-click its face above to delete the local data.")
                             .font(AppFonts.ui(13.5))
                             .foregroundStyle(appTheme.muted)
                             .multilineTextAlignment(.center)
@@ -80,7 +80,7 @@ struct ChatTabContent: View {
             Text("Select or create a session")
                 .font(AppFonts.heading(24, weight: .semibold))
                 .foregroundStyle(appTheme.text)
-            Text("Open a project from the sidebar, or start here.")
+            Text("Choose a project, or start a quick chat.")
                 .font(AppFonts.ui(13.5))
                 .foregroundStyle(appTheme.muted)
             HStack(spacing: 10) {

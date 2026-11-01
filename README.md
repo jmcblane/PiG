@@ -20,12 +20,14 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 
 ### Projects & sessions
 
-- Sidebar with projects and their sessions, plus a Files tab
+- Open chats sit in the top bar as a row of pixel faces: drag to reorder, right-click to mark done, rename, or unload
+- ⌘K palette for open chats, all sessions (including the archive), agents, projects, files, models, and actions
+- Project files in a popover from the top bar
 - Project home page listing recent sessions
 - Quick Chats: throwaway chats that don't belong to a project
 - Session names generated automatically (by the session's model, a model you pick, or Apple Intelligence on the Mac)
 - Session tree view: jump to any earlier point in a conversation and fork a new session from a prompt
-- Search across all sessions (⌘F) and browse archived sessions
+- Search across all sessions, including archived ones (⌘F)
 - Several sessions can run at once; idle ones can be unloaded or reloaded
 - macOS notification when a reply finishes while you're in another app
 
@@ -33,7 +35,7 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 
 - Create reusable pi agents with your choice of model, extensions, and skills. Selected skills are automatically included in context for every chat.
 - Connect local or remote Hermes agents and chat with them in PiG.
-- Switch between agents and projects in the picker; agent chats appear as sidebar threads.
+- Switch between agents and projects in the picker; agent chats join the top bar with the agent's face.
 
 ### Chat & composer
 
@@ -44,7 +46,7 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 - Attach images by pasting or dragging
 - `@` completion for files and skills, and slash-command suggestions
 - Queue steering and follow-up messages while the agent works (Option-Up returns queued messages to the composer)
-- Context-usage meter in the composer
+- Context use shown as a ring around the send button; thinking level as rising bars you click to step
 - Claude subscription usage for `claude-bridge`, updated when Claude Code reports quota data (no separate Pi OAuth login required)
 
 ### Inline HTML controls
@@ -83,7 +85,7 @@ the chat.
 
 ### Appearance
 
-- 23 themes, including Nord, Dracula, Tokyo Night, Rosé Pine and GitHub Light
+- Themes including Dusk (the default), Nord, Dracula, Tokyo Night, Rosé Pine and GitHub Light
 - Adjustable text size (⌘+ / ⌘−)
 - Native SwiftUI app for macOS 14+
 

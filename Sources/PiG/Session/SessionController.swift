@@ -841,7 +841,7 @@ final class SessionController: ObservableObject, Identifiable {
     private static let builtinNotices: [String: String] = [
         "settings": "Settings available in the GUI: model picker, thinking picker, runtime policy, context meter. Other pi settings remain available in the terminal TUI via `/settings`.",
         "hotkeys": "**GUI Hotkeys**\n\n| Key | Action |\n|---|---|\n| `Return` | Send |\n| `Shift+Return` | New line |\n| `Tab` | Complete `/slash-command` or `@filename` |\n| `Shift+Tab` | Cycle pinned models |\n| `Cmd+1`–`Cmd+5` | Select quick models configured in Settings |\n| `/` | Slash command suggestions |\n| `!cmd` | Bash into context |\n| `!!cmd` | Hidden bash |",
-        "resume": "Use the left sidebar to resume sessions. The GUI keeps sessions visible instead of opening pi's TUI `/resume` picker.",
+        "resume": "Press ⌘F to find and resume sessions. The GUI keeps open sessions in the top bar instead of opening pi's TUI `/resume` picker.",
         "scoped-models": "Scoped model selection is TUI-only. Use `/model <name>` or the toolbar model picker in PiG.",
         "trust": "PiG automatically trusts projects explicitly added or created here. Projects discovered from session history are not bulk-trusted.",
         "share": "`/share` is TUI-only. Use `/export [file.html]`, then share the exported file.",

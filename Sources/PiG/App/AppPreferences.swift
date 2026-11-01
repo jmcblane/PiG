@@ -62,24 +62,6 @@ enum NotificationPreference {
     }
 }
 
-enum SidebarPreference {
-    private static let visibilityKey = "PiG.sidebar.visible"
-    private static let widthKey = "PiG.sidebar.width"
-
-    static var visible: Bool {
-        get { UserDefaults.standard.bool(forKey: visibilityKey, default: true) }
-        set { UserDefaults.standard.set(newValue, forKey: visibilityKey) }
-    }
-
-    static var width: CGFloat {
-        get {
-            let stored = UserDefaults.standard.double(forKey: widthKey)
-            return stored > 0 ? CGFloat(stored) : 238
-        }
-        set { UserDefaults.standard.set(Double(newValue), forKey: widthKey) }
-    }
-}
-
 enum QuickChatsFolderPreference {
     static let key = "PiG.quickChats.folderPath"
 
@@ -159,23 +141,3 @@ enum ComposerFocusAccentPreference {
     }
 }
 
-enum ProjectHeaderStyle: String, CaseIterable, Identifiable, Hashable {
-    case nameOnly = "nameOnly"
-    case band = "band"
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .nameOnly: return "Name Only"
-        case .band: return "Band"
-        }
-    }
-
-    private static let storageKey = "PiG.sidebar.projectHeaderStyle"
-
-    static var stored: ProjectHeaderStyle {
-        get { UserDefaults.standard.storedEnum(forKey: storageKey, default: .nameOnly) }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: storageKey) }
-    }
-}
