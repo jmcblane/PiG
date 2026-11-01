@@ -8,6 +8,10 @@ extension AppThemeChoice {
         case .defaultTheme:
             return [0x43464c, 0xff6b61, 0x65c88d, 0xffcc4d, 0x4ca8ff, 0xbf5af2, 0x64d2ff, 0xb9bec5,
                     0x6c7079, 0xff8a82, 0x86d9a8, 0xffdd80, 0x73baff, 0xd48cf7, 0x8fe0ff, 0xeceef1]
+        case .finderBlueGlow: return AppThemeChoice.defaultTheme.terminalANSIColors
+        case .nordGlow: return AppThemeChoice.nord.terminalANSIColors
+        case .tokyoNightStormGlow: return AppThemeChoice.tokyoNightStorm.terminalANSIColors
+        case .rosePineGlow: return AppThemeChoice.rosePine.terminalANSIColors
         case .dusk:
             return [0x433a58, 0xff8fae, 0x8fe3c4, 0xffd38a, 0x9ab8ff, 0xc9a5ff, 0x8fd8e3, 0xc0b6d3,
                     0x6b6085, 0xffabc2, 0xb0eed6, 0xffe2ae, 0xb8cdff, 0xdcc3ff, 0xb0e6ee, 0xf1ecf8]

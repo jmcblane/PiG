@@ -105,24 +105,24 @@ struct RootView: View {
     }
 }
 
-/// Theme background; Dusk adds a warm glow from the top and a cool one from the corner.
+/// Theme background, plus the theme's glow (warm from the top, cool from the corner) if it has one.
 private struct WindowBackdrop: View {
     @Environment(\.appTheme) private var appTheme
 
     var body: some View {
         ZStack {
             appTheme.background
-            if appTheme.choice == .dusk {
+            if let glow = appTheme.choice.glow {
                 GeometryReader { geometry in
                     let size = geometry.size
                     RadialGradient(
-                        colors: [appTheme.brass.opacity(0.13), .clear],
+                        colors: [glow.top.color.opacity(0.13), .clear],
                         center: UnitPoint(x: 0.5, y: -0.1),
                         startRadius: 0,
                         endRadius: max(size.width, size.height) * 0.6
                     )
                     RadialGradient(
-                        colors: [appTheme.good.opacity(0.06), .clear],
+                        colors: [glow.corner.color.opacity(0.06), .clear],
                         center: .bottomTrailing,
                         startRadius: 0,
                         endRadius: max(size.width, size.height) * 0.55

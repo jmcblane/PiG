@@ -551,14 +551,6 @@ private struct InboxSessionListRow: View {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(selected ? appTheme.panel2 : hovering ? appTheme.panel.opacity(0.7) : InboxColumn.background(appTheme))
         }
-        .overlay(alignment: .leading) {
-            if selected {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(appTheme.brass)
-                    .frame(width: 2.5)
-                    .padding(.vertical, 10)
-            }
-        }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
     }

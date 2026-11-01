@@ -85,7 +85,7 @@ the chat.
 
 ### Appearance
 
-- Themes including Dusk (the default), Nord, Dracula, Tokyo Night, Rosé Pine and GitHub Light
+- Themes including Dusk (the default), Glow versions of Finder Blue, Nord, Tokyo Night Storm and Rosé Pine, Nord, Dracula, Tokyo Night, Rosé Pine and GitHub Light
 - Adjustable text size (⌘+ / ⌘−)
 - Native SwiftUI app for macOS 14+
 

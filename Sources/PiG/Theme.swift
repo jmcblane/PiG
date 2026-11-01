@@ -111,11 +111,14 @@ private extension ThemeRGB {
 
 enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
     case defaultTheme = "default"
+    case finderBlueGlow = "finderBlueGlow"
     case dusk = "dusk"
     case oxocarbonDark = "oxocarbonDark"
     case seoul256 = "seoul256"
     case nord = "nord"
+    case nordGlow = "nordGlow"
     case rosePine = "rosePine"
+    case rosePineGlow = "rosePineGlow"
     case aura = "aura"
     case atomOneDark = "atomOneDark"
     case monokaiProSpectrum = "monokaiProSpectrum"
@@ -124,6 +127,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
     case everforestDark = "everforestDark"
     case dracula = "dracula"
     case tokyoNightStorm = "tokyoNightStorm"
+    case tokyoNightStormGlow = "tokyoNightStormGlow"
 
     private static let storageKey = "PiG.selectedTheme"
 
@@ -132,11 +136,14 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
     var displayName: String {
         switch self {
         case .defaultTheme: return "Finder Blue"
+        case .finderBlueGlow: return "Finder Blue Glow"
         case .dusk: return "Dusk (Default)"
         case .oxocarbonDark: return "Oxocarbon Dark"
         case .seoul256: return "Seoul256"
         case .nord: return "Nord"
+        case .nordGlow: return "Nord Glow"
         case .rosePine: return "Rosé Pine"
+        case .rosePineGlow: return "Rosé Pine Glow"
         case .aura: return "Aura"
         case .atomOneDark: return "Atom One Dark"
         case .monokaiProSpectrum: return "Monokai Pro Spectrum"
@@ -145,6 +152,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
         case .everforestDark: return "Everforest Dark"
         case .dracula: return "Dracula"
         case .tokyoNightStorm: return "Tokyo Night Storm"
+        case .tokyoNightStormGlow: return "Tokyo Night Storm Glow"
         }
     }
 
@@ -154,6 +162,19 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
     }
 
     var isLight: Bool { palette.background.relativeLuminance > 0.179 }
+
+    /// Soft light behind the window, from the top and from the bottom-right corner.
+    /// Nil for flat themes.
+    var glow: (top: ThemeRGB, corner: ThemeRGB)? {
+        switch self {
+        case .dusk: return (palette.accent, palette.good)
+        case .finderBlueGlow: return (palette.accent, palette.good)
+        case .nordGlow: return (palette.accent, ThemeRGB(hex: 0xb48ead))
+        case .tokyoNightStormGlow: return (palette.accent, ThemeRGB(hex: 0xbb9af7))
+        case .rosePineGlow: return (ThemeRGB(hex: 0xebbcba), palette.good)
+        default: return nil
+        }
+    }
 
     private static let palettes: [AppThemeChoice: AppThemePalette] = Dictionary(
         uniqueKeysWithValues: allCases.map { ($0, $0.makePalette()) }
@@ -221,6 +242,126 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                     quoteForeground: MarkdownColor(hex: 0xc0b6d3),
                     link: MarkdownColor(hex: 0x9ab8ff),
                     tableHeaderBackground: MarkdownColor(hex: 0xffb38a, opacity: 0.12),
+                    evenRowBackground: MarkdownColor(hex: 0xffffff, opacity: 0.03)
+                )
+            )
+        case .finderBlueGlow:
+            return AppThemePalette(
+                background: ThemeRGB(hex: 0x1d2230),
+                panel: ThemeRGB(hex: 0x252b3c),
+                panel2: ThemeRGB(hex: 0x2e3549),
+                line: ThemeRGB(hex: 0x3b4459),
+                lineBright: ThemeRGB(hex: 0x5cb0ff),
+                text: ThemeRGB(hex: 0xedf1f8),
+                secondaryText: ThemeRGB(hex: 0xbcc5d6),
+                muted: ThemeRGB(hex: 0x8b95aa),
+                accent: ThemeRGB(hex: 0x5cb0ff),
+                danger: ThemeRGB(hex: 0xff7a72),
+                good: ThemeRGB(hex: 0x6fd6b8),
+                userRow: ThemeRGB(hex: 0x2e3549),
+                codeText: ThemeRGB(hex: 0xa8d1ff),
+                codeBackground: ThemeRGB(hex: 0x161a25),
+                markdown: MarkdownThemePalette(
+                    userForeground: MarkdownColor(hex: 0xedf1f8),
+                    assistantForeground: MarkdownColor(hex: 0xdde3ec),
+                    strong: MarkdownColor(hex: 0xedf1f8),
+                    emphasis: MarkdownColor(hex: 0xa8d1ff),
+                    deleted: MarkdownColor(hex: 0x8b95aa),
+                    codeBackground: MarkdownColor(hex: 0x5cb0ff, opacity: 0.10),
+                    codeBorder: MarkdownColor(hex: 0x5cb0ff, opacity: 0.22),
+                    quoteForeground: MarkdownColor(hex: 0xbcc5d6),
+                    link: MarkdownColor(hex: 0x7dc0ff),
+                    tableHeaderBackground: MarkdownColor(hex: 0x5cb0ff, opacity: 0.12),
+                    evenRowBackground: MarkdownColor(hex: 0xffffff, opacity: 0.03)
+                )
+            )
+        case .nordGlow:
+            return AppThemePalette(
+                background: ThemeRGB(hex: 0x272d3a),
+                panel: ThemeRGB(hex: 0x303746),
+                panel2: ThemeRGB(hex: 0x3b4253),
+                line: ThemeRGB(hex: 0x475064),
+                lineBright: ThemeRGB(hex: 0x88c0d0),
+                text: ThemeRGB(hex: 0xeceff4),
+                secondaryText: ThemeRGB(hex: 0xd0d7e3),
+                muted: ThemeRGB(hex: 0x8590a3),
+                accent: ThemeRGB(hex: 0x88c0d0),
+                danger: ThemeRGB(hex: 0xd27b84),
+                good: ThemeRGB(hex: 0xa3be8c),
+                userRow: ThemeRGB(hex: 0x3b4253),
+                codeText: ThemeRGB(hex: 0x8fbcbb),
+                codeBackground: ThemeRGB(hex: 0x20252f),
+                markdown: MarkdownThemePalette(
+                    userForeground: MarkdownColor(hex: 0xeceff4),
+                    assistantForeground: MarkdownColor(hex: 0xd8dee9),
+                    strong: MarkdownColor(hex: 0xeceff4),
+                    emphasis: MarkdownColor(hex: 0xb48ead),
+                    deleted: MarkdownColor(hex: 0x8590a3),
+                    codeBackground: MarkdownColor(hex: 0x88c0d0, opacity: 0.10),
+                    codeBorder: MarkdownColor(hex: 0x88c0d0, opacity: 0.22),
+                    quoteForeground: MarkdownColor(hex: 0x9aa4b5),
+                    link: MarkdownColor(hex: 0x81a1c1),
+                    tableHeaderBackground: MarkdownColor(hex: 0x88c0d0, opacity: 0.12),
+                    evenRowBackground: MarkdownColor(hex: 0xffffff, opacity: 0.03)
+                )
+            )
+        case .tokyoNightStormGlow:
+            return AppThemePalette(
+                background: ThemeRGB(hex: 0x222639),
+                panel: ThemeRGB(hex: 0x2a2f46),
+                panel2: ThemeRGB(hex: 0x333954),
+                line: ThemeRGB(hex: 0x3d4463),
+                lineBright: ThemeRGB(hex: 0x7aa2f7),
+                text: ThemeRGB(hex: 0xc8d0f5),
+                secondaryText: ThemeRGB(hex: 0xa9b1d6),
+                muted: ThemeRGB(hex: 0x737aa2),
+                accent: ThemeRGB(hex: 0x7aa2f7),
+                danger: ThemeRGB(hex: 0xf7768e),
+                good: ThemeRGB(hex: 0x9ece6a),
+                userRow: ThemeRGB(hex: 0x333954),
+                codeText: ThemeRGB(hex: 0x7dcfff),
+                codeBackground: ThemeRGB(hex: 0x1b1e2e),
+                markdown: MarkdownThemePalette(
+                    userForeground: MarkdownColor(hex: 0xc8d0f5),
+                    assistantForeground: MarkdownColor(hex: 0xc0caf5),
+                    strong: MarkdownColor(hex: 0xc8d0f5),
+                    emphasis: MarkdownColor(hex: 0xbb9af7),
+                    deleted: MarkdownColor(hex: 0x737aa2),
+                    codeBackground: MarkdownColor(hex: 0x7aa2f7, opacity: 0.10),
+                    codeBorder: MarkdownColor(hex: 0x7aa2f7, opacity: 0.22),
+                    quoteForeground: MarkdownColor(hex: 0x9aa5ce),
+                    link: MarkdownColor(hex: 0x7dcfff),
+                    tableHeaderBackground: MarkdownColor(hex: 0x7aa2f7, opacity: 0.12),
+                    evenRowBackground: MarkdownColor(hex: 0xffffff, opacity: 0.03)
+                )
+            )
+        case .rosePineGlow:
+            return AppThemePalette(
+                background: ThemeRGB(hex: 0x1e1b2c),
+                panel: ThemeRGB(hex: 0x262338),
+                panel2: ThemeRGB(hex: 0x2f2b45),
+                line: ThemeRGB(hex: 0x3c3754),
+                lineBright: ThemeRGB(hex: 0xc4a7e7),
+                text: ThemeRGB(hex: 0xe0def4),
+                secondaryText: ThemeRGB(hex: 0xc8c5dd),
+                muted: ThemeRGB(hex: 0x8a85a3),
+                accent: ThemeRGB(hex: 0xc4a7e7),
+                danger: ThemeRGB(hex: 0xeb6f92),
+                good: ThemeRGB(hex: 0x9ccfd8),
+                userRow: ThemeRGB(hex: 0x2f2b45),
+                codeText: ThemeRGB(hex: 0xf6c177),
+                codeBackground: ThemeRGB(hex: 0x17151f),
+                markdown: MarkdownThemePalette(
+                    userForeground: MarkdownColor(hex: 0xe0def4),
+                    assistantForeground: MarkdownColor(hex: 0xe0def4),
+                    strong: MarkdownColor(hex: 0xe0def4),
+                    emphasis: MarkdownColor(hex: 0xebbcba),
+                    deleted: MarkdownColor(hex: 0x8a85a3),
+                    codeBackground: MarkdownColor(hex: 0xc4a7e7, opacity: 0.10),
+                    codeBorder: MarkdownColor(hex: 0xc4a7e7, opacity: 0.22),
+                    quoteForeground: MarkdownColor(hex: 0x908caa),
+                    link: MarkdownColor(hex: 0xebbcba),
+                    tableHeaderBackground: MarkdownColor(hex: 0xc4a7e7, opacity: 0.12),
                     evenRowBackground: MarkdownColor(hex: 0xffffff, opacity: 0.03)
                 )
             )
