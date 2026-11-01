@@ -76,8 +76,6 @@ struct ComposerView: View {
                     .padding(.top, 10)
                 }
                 HStack(alignment: .bottom, spacing: 10) {
-                    AgentAvatar(look: model.look(for: controller), size: 28)
-                        .padding(.bottom, 5)
                     GrowingComposerTextView(
                         text: $draft,
                         height: $entryHeight,
@@ -110,7 +108,7 @@ struct ComposerView: View {
                     }
                     .padding(.bottom, 1)
                 }
-                .padding(.leading, 12)
+                .padding(.leading, 14)
                 .padding(.trailing, 10)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .bottomLeading)

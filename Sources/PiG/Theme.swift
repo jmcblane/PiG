@@ -12,6 +12,13 @@ struct ThemeRGB: Hashable {
         self.blue = blue
     }
 
+    init(nsColor: NSColor) {
+        let color = nsColor.usingColorSpace(.sRGB) ?? nsColor
+        self.red = Double(color.redComponent)
+        self.green = Double(color.greenComponent)
+        self.blue = Double(color.blueComponent)
+    }
+
     init(hex: Int) {
         self.red = Double((hex >> 16) & 0xff) / 255.0
         self.green = Double((hex >> 8) & 0xff) / 255.0

@@ -28,7 +28,7 @@ struct ComposerToolbar: View {
                 .frame(width: 84)
             }
         }
-        .padding(.leading, 44)
+        .padding(.leading, 8)
         .padding(.trailing, 14)
         .task(id: selectedModel) {
             _ = await PiEnvironment.mergedAsync()

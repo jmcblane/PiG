@@ -61,7 +61,7 @@ enum PaletteScope: String, CaseIterable {
 
 struct PaletteItem: Identifiable {
     enum Icon {
-        case look(Look)
+        case chat(ChatIcon)
         case symbol(String)
         case file(URL)
     }
@@ -319,7 +319,7 @@ struct CommandPalette: View {
                 id: "chat:\(id)", kind: .chats,
                 title: model.inboxItemTitle(id),
                 subtitle: [model.inboxItemSubtitle(id), model.inboxItemStatusText(id)].compactMap { $0 }.joined(separator: ", "),
-                icon: .look(model.inboxItemLook(id)),
+                icon: .chat(model.inboxItemIcon(id)),
                 checked: model.isInboxItemSelected(id)
             ) { model.selectInboxItem(id) }
         }
@@ -345,7 +345,7 @@ struct CommandPalette: View {
                 id: "session:\(summary.filePath)", kind: .sessions,
                 title: summary.title.isEmpty ? "Untitled" : summary.title,
                 subtitle: "\(place), \(summary.timestamp.formatted(.relative(presentation: .named)))",
-                icon: .look(model.sessionLook(summary)),
+                icon: .chat(model.chatIcon(for: summary)),
                 session: summary,
                 inboxKey: "chat:\(model.inboxID(forSessionPath: summary.filePath))"
             ) { model.selectSession(summary) }
@@ -355,7 +355,7 @@ struct CommandPalette: View {
                 id: "hermes:\(chat.id)", kind: .sessions,
                 title: chat.title,
                 subtitle: model.hermesAgent(for: chat)?.name ?? "Hermes",
-                icon: .look(model.hermesAgent(for: chat)?.look ?? Look.seeded(key: chat.id, projectPath: nil)),
+                icon: .chat(model.chatIcon(for: chat)),
                 inboxKey: "chat:hermes:\(chat.id)"
             ) { model.selectHermesChat(agentID: chat.agentID, chatID: chat.id) }
         }
@@ -367,7 +367,7 @@ struct CommandPalette: View {
             PaletteItem(
                 id: "agent:\(agent.id)", kind: .agents,
                 title: agent.name, subtitle: agent.role,
-                icon: .look(agent.look),
+                icon: .chat(.agent(agent.look)),
                 checked: model.selectedAgentID == agent.id
             ) { model.selectAgent(agent.id) }
         }
@@ -588,8 +588,8 @@ private struct PaletteRow: View {
 
     @ViewBuilder private var icon: some View {
         switch item.icon {
-        case .look(let look):
-            AgentAvatar(look: look, size: 26)
+        case .chat(let icon):
+            ChatIconView(icon: icon, size: 26)
         case .symbol(let name):
             Image(systemName: name)
                 .font(AppFonts.ui(12, weight: .medium))

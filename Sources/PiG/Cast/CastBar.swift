@@ -357,7 +357,7 @@ private struct CastControllerMember: View {
         CastFaceButton(
             title: controller.title.isEmpty ? (controller.isQuickChat ? "Quick chat" : "Untitled") : controller.title,
             subtitle: agent?.name ?? (controller.isQuickChat ? "Quick chat" : controller.projectName),
-            look: model.look(for: controller),
+            icon: model.chatIcon(for: controller),
             status: controller.extensionUIPrompt != nil ? .needsInput
                 : working ? .working
                 : model.finishedUnseen(controller) ? .unread : .idle,
@@ -392,7 +392,7 @@ private struct CastSummaryMember: View {
         CastFaceButton(
             title: summary.title,
             subtitle: agent?.name ?? (quick ? "Quick chat" : model.projectDisplayName(for: summary.projectPath)),
-            look: agent?.look ?? Look.seeded(key: summary.filePath, projectPath: quick ? nil : summary.projectPath),
+            icon: model.chatIcon(for: summary),
             status: working ? .working : model.finishedUnseen(forSessionPath: summary.filePath) ? .unread : .idle,
             loaded: model.loadedController(forSessionPath: summary.filePath) != nil,
             selected: model.selectedController?.sessionPath == summary.filePath,
@@ -438,7 +438,7 @@ private struct CastHermesMember: View {
         CastFaceButton(
             title: chat.title,
             subtitle: agent?.name ?? "Hermes",
-            look: agent?.look ?? Look.seeded(key: chat.id, projectPath: nil),
+            icon: model.chatIcon(for: chat),
             status: needsInput ? .needsInput
                 : working ? .working
                 : model.hermesUnreadChatIDs.contains(chat.id) ? .unread : .idle,
@@ -471,7 +471,7 @@ private struct CastFaceButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let title: String
     let subtitle: String
-    let look: Look
+    let icon: ChatIcon
     let status: CastStatus
     let loaded: Bool
     let selected: Bool
@@ -484,11 +484,11 @@ private struct CastFaceButton: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 5) {
-                AgentAvatar(look: look, size: size)
+                ChatIconView(icon: icon, size: size)
                     .opacity(selected ? 1 : hovering ? 1 : loaded ? 0.9 : 0.72)
                     .saturation(loaded || selected || hovering ? 1 : 0.7)
                     .scaleEffect(selected ? 1.12 : 1, anchor: .bottom)
-                    .shadow(color: selected ? Color(lookHex: look.shirt).opacity(0.45) : .clear, radius: 8, y: 4)
+                    .shadow(color: selected ? Color(lookHex: icon.tint).opacity(0.45) : .clear, radius: 8, y: 4)
                     .overlay(alignment: .topTrailing) { statusBadge.offset(x: small ? 5 : 8, y: -5) }
                     .padding(.top, small ? 10 : 0)
                 Text(selected ? title : " ")
@@ -770,25 +770,25 @@ extension AppModel {
         return finishedUnseen(forSessionPath: summary.filePath) ? "new reply" : nil
     }
 
-    func inboxItemLook(_ itemID: String) -> Look {
-        if let chat = inboxHermesChat(for: itemID) {
-            return hermesAgent(for: chat)?.look ?? Look.seeded(key: chat.id, projectPath: nil)
-        }
-        if let controller = inboxController(for: itemID) { return look(for: controller) }
-        guard let summary = inboxSummary(for: itemID) else { return Look.seeded(key: itemID, projectPath: nil) }
-        return sessionLook(summary)
+    func inboxItemIcon(_ itemID: String) -> ChatIcon {
+        if let chat = inboxHermesChat(for: itemID) { return chatIcon(for: chat) }
+        if let controller = inboxController(for: itemID) { return chatIcon(for: controller) }
+        guard let summary = inboxSummary(for: itemID) else { return .quickChat }
+        return chatIcon(for: summary)
     }
 
-    func look(for controller: SessionController) -> Look {
-        agent(for: controller)?.look ?? Look.seeded(
-            key: controller.sessionPath ?? controller.id,
-            projectPath: controller.isQuickChat ? nil : controller.projectPath
-        )
+    func chatIcon(for controller: SessionController) -> ChatIcon {
+        if let agent = agent(for: controller) { return .agent(agent.look) }
+        return controller.isQuickChat ? .quickChat : .project(path: controller.projectPath)
     }
 
-    func sessionLook(_ summary: SessionSummary) -> Look {
-        agent(forSessionPath: summary.filePath)?.look
-            ?? Look.seeded(key: summary.filePath, projectPath: isQuickChatsProject(summary.projectPath) ? nil : summary.projectPath)
+    func chatIcon(for summary: SessionSummary) -> ChatIcon {
+        if let agent = agent(forSessionPath: summary.filePath) { return .agent(agent.look) }
+        return isQuickChatsProject(summary.projectPath) ? .quickChat : .project(path: summary.projectPath)
+    }
+
+    func chatIcon(for chat: HermesChatRecord) -> ChatIcon {
+        hermesAgent(for: chat).map { .agent($0.look) } ?? .project(color: "#9aa3ad")
     }
 
     /// Inbox ID of the selected chat, if it is open in the cast.
@@ -809,49 +809,6 @@ extension AppModel {
     /// True on the new-chat landing, when no open chat or agent is selected.
     var isComposingNewChat: Bool {
         selectedControllerID == nil && selectedHermesChatID == nil && selectedAgentID == nil
-    }
-}
-
-// MARK: - Faces for chats without an agent
-
-extension Look {
-    /// A stable face for `key`. Chats in the same project share a shirt color, so the
-    /// project reads at a glance; quick chats (no project) get their own color.
-    static func seeded(key: String, projectPath: String?) -> Look {
-        var rng = SeededGenerator(seed: stableHash(key))
-        func pick<T>(_ items: [T]) -> T { items[Int(rng.next() % UInt64(items.count))] }
-        let accessories: [Accessory] = [.none, .none, .none, .glasses, .glasses, .beard]
-        let tops: [Top] = [.tee, .tee, .collar, .hoodie]
-        let shirt = projectPath.map { shirts[Int(stableHash($0) % UInt64(shirts.count))] } ?? "#ffb703"
-        return Look(
-            skin: pick(skins), hair: pick(hairs), shirt: shirt,
-            pants: pick(pantsColors), shoes: pick(shoeColors), hairStyle: pick(Hair.allCases),
-            top: pick(tops), accessory: pick(accessories), accentColor: pick(accents),
-            tie: nil, happy: rng.next() % 2 == 0
-        )
-    }
-
-    /// FNV-1a; `hashValue` is randomized per launch.
-    private static func stableHash(_ text: String) -> UInt64 {
-        var hash: UInt64 = 0xcbf29ce484222325
-        for byte in text.utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x100000001b3
-        }
-        return hash
-    }
-}
-
-/// SplitMix64.
-private struct SeededGenerator {
-    var state: UInt64
-    init(seed: UInt64) { state = seed }
-    mutating func next() -> UInt64 {
-        state &+= 0x9e3779b97f4a7c15
-        var z = state
-        z = (z ^ (z >> 30)) &* 0xbf58476d1ce4e5b9
-        z = (z ^ (z >> 27)) &* 0x94d049bb133111eb
-        return z ^ (z >> 31)
     }
 }
 
