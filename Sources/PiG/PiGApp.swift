@@ -27,11 +27,10 @@ struct PiGApp: App {
                 .preferredColorScheme(model.selectedTheme.isLight ? .light : .dark)
                 .frame(minWidth: WindowLaunchDefaults.minimumSize.width, idealWidth: WindowLaunchDefaults.defaultSize.width, minHeight: WindowLaunchDefaults.minimumSize.height, idealHeight: WindowLaunchDefaults.defaultSize.height)
                 .background {
-                    TitlebarCustomActionsInstaller(model: model).frame(width: 0, height: 0)
                     MainWindowCloseGuard(appDelegate: appDelegate, model: model).frame(width: 0, height: 0)
                 }
         }
-        .windowStyle(.titleBar)
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: WindowLaunchDefaults.defaultSize.width, height: WindowLaunchDefaults.defaultSize.height)
         .windowResizability(.contentMinSize)
         .commands {

@@ -10,121 +10,24 @@ extension Notification.Name {
 struct RootView: View {
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
-    @State private var sidebarWidth: CGFloat = SidebarPreference.width
-    @State private var sidebarSearchRequest: UUID?
-    @State private var sidebarAutoCollapsedForCompact = false
-    @State private var sidebarHoverRevealed = false
-    @State private var sidebarRevealWorkItem: DispatchWorkItem?
-    @State private var chatInsetActive = false
-    @State private var chatInsetCommitGeneration = 0
     @State private var renameText = ""
-
-    private let minSidebarWidth: CGFloat = 238
-    private let maxSidebarWidth: CGFloat = 520
-    private let minChatWidth: CGFloat = 620
-    /// Hit-target only; overlaid on the sidebar edge so it does not open a visual gap.
-    private let resizeHandleWidth: CGFloat = 6
-    private let sidebarRevealEdgeWidth: CGFloat = 18
-    private let sidebarRevealButtonClearance: CGFloat = 58
-    private let sidebarAnimationDuration: TimeInterval = 0.22
-    private var sidebarAnimation: Animation { .smooth(duration: sidebarAnimationDuration, extraBounce: 0) }
 
     var body: some View {
         GeometryReader { geometry in
             let size = geometry.size.sanitizedForLayout
-            let compact = shouldUseSidebarDrawer(width: size.width)
-            let drawerWidth = drawerWidth(for: size.width)
-            let clampedSidebarWidth = min(max(sidebarWidth, minSidebarWidth), maxSidebarWidth)
-            let showInlineSidebar = !compact && model.sidebarVisible
-            let inlineSurfaceWidth = clampedSidebarWidth
-            // The chat pane's layout width must change in a single step
-            // (immediately on collapse, at slide-end on expand) so the message
-            // history re-wraps once instead of on every animation frame.
-            let chatInset = (chatInsetActive && showInlineSidebar) ? inlineSurfaceWidth : 0
-            let showHoverDrawer = !model.sidebarVisible && sidebarHoverRevealed
-            let showCompactDrawer = compact && model.sidebarVisible
-            let showDrawerSurface = compact || !model.sidebarVisible
-            let showDrawer = showHoverDrawer || showCompactDrawer
 
             ZStack(alignment: .topLeading) {
-                ChatPaneView(controller: model.selectedController)
-                    .frame(width: max(1, size.width - chatInset), height: size.height, alignment: .topLeading)
-                    .offset(x: chatInset)
-                    .animation(nil, value: chatInset)
-                    .zIndex(1)
-
-                if !compact {
-                    ZStack(alignment: .trailing) {
-                        SidebarView(searchRequest: showInlineSidebar ? sidebarSearchRequest : nil)
-                            .frame(width: clampedSidebarWidth, height: size.height, alignment: .topLeading)
-                        SidebarResizeHandle(
-                            width: $sidebarWidth,
-                            minWidth: minSidebarWidth,
-                            maxWidth: max(minSidebarWidth, min(maxSidebarWidth, size.width - minChatWidth))
-                        )
-                        .frame(width: resizeHandleWidth, height: size.height)
-                        .offset(x: resizeHandleWidth / 2)
-                    }
-                    .frame(width: inlineSurfaceWidth, height: size.height, alignment: .topLeading)
-                    .compositingGroup()
-                    .offset(x: showInlineSidebar ? 0 : -inlineSurfaceWidth)
-                    .animation(sidebarAnimation, value: showInlineSidebar)
-                    .allowsHitTesting(showInlineSidebar)
-                    .zIndex(2)
+                VStack(spacing: 0) {
+                    CastBar()
+                    ChatPaneView(controller: model.selectedController)
                 }
-
-                if !model.sidebarVisible {
-                    Rectangle()
-                        .fill(Color.black.opacity(0.001))
-                        .contentShape(Rectangle())
-                        .frame(width: sidebarRevealEdgeWidth, height: max(0, size.height - sidebarRevealButtonClearance))
-                        .offset(y: sidebarRevealButtonClearance)
-                        .onHover { hovering in
-                            if hovering {
-                                scheduleSidebarReveal()
-                            } else {
-                                cancelPendingSidebarReveal()
-                            }
-                        }
-                        .zIndex(3)
-                }
-
-                if compact {
-                    Color.black.opacity(model.sidebarVisible ? 0.32 : 0)
-                        .contentShape(Rectangle())
-                        .allowsHitTesting(model.sidebarVisible)
-                        .onTapGesture {
-                            setSidebarVisible(false)
-                        }
-                        .animation(sidebarAnimation, value: model.sidebarVisible)
-                        .zIndex(5)
-                }
-
-                if showDrawerSurface {
-                    SidebarView(searchRequest: showDrawer ? sidebarSearchRequest : nil)
-                        .frame(width: drawerWidth, height: size.height, alignment: .topLeading)
-                        .background(appTheme.panel)
-                        .shadow(color: Color.black.opacity(0.42), radius: showDrawer ? 24 : 0, x: 8, y: 0)
-                        .offset(x: showDrawer ? 0 : -drawerWidth - 28)
-                        .opacity(showDrawer ? 1 : 0)
-                        .compositingGroup()
-                        .animation(sidebarAnimation, value: showDrawer)
-                        .allowsHitTesting(showDrawer)
-                        .onHover { hovering in
-                            if !hovering, !model.sidebarVisible {
-                                withAnimation(sidebarAnimation) {
-                                    sidebarHoverRevealed = false
-                                }
-                            }
-                        }
-                        .zIndex(6)
-                }
+                .frame(width: size.width, height: size.height)
 
                 VStack(alignment: .trailing, spacing: 8) {
                     PiMaintenanceHost(controller: model.piMaintenance, theme: model.selectedTheme)
                     UnifiedGlobalToast()
                 }
-                .padding(.top, 16)
+                .padding(.top, CastBar.height + 8)
                 .padding(.trailing, 16)
                 .frame(width: size.width, height: size.height, alignment: .topTrailing)
                 .zIndex(10)
@@ -162,33 +65,10 @@ struct RootView: View {
                 }
                 .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .onAppear {
-                syncSidebarVisibilityForCompact(compact)
-                chatInsetActive = !compact && model.sidebarVisible
-            }
-            .onChange(of: showInlineSidebar) { _, inline in scheduleChatInsetCommit(inline: inline) }
-            .onChange(of: compact) { _, isCompact in syncSidebarVisibilityForCompact(isCompact) }
-            .onReceive(NotificationCenter.default.publisher(for: .pigRevealSidebarSearch)) { _ in
-                model.sidebarMode = .sessions
-                setSidebarVisible(true)
-                sidebarSearchRequest = UUID()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .pigToggleSidebar)) { _ in
-                setSidebarVisible(!model.sidebarVisible)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-                cancelPendingSidebarReveal()
-                hideCollapsedSidebarDrawerIfNeeded(compact: compact)
-            }
-            .onDisappear {
-                cancelPendingSidebarReveal()
-            }
         }
+        .ignoresSafeArea(.container, edges: .top)
         .background(appTheme.background)
         .font(AppFonts.ui(14))
-        .onChange(of: sidebarWidth) { _, width in
-            SidebarPreference.width = min(max(width, minSidebarWidth), maxSidebarWidth)
-        }
         .sheet(item: Binding(
             get: { model.agentEditorInSettings ? nil : model.agentEditorRequest },
             set: { model.agentEditorRequest = $0 }
@@ -206,75 +86,6 @@ struct RootView: View {
                 },
                 secondaryButton: .cancel()
             )
-        }
-    }
-
-    private func shouldUseSidebarDrawer(width: CGFloat) -> Bool {
-        width < sidebarWidth + minChatWidth
-    }
-
-    private func drawerWidth(for windowWidth: CGFloat) -> CGFloat {
-        max(1, min(sidebarWidth, max(minSidebarWidth, windowWidth - 76)))
-    }
-
-    private func scheduleChatInsetCommit(inline: Bool) {
-        chatInsetCommitGeneration += 1
-        if inline {
-            let generation = chatInsetCommitGeneration
-            DispatchQueue.main.asyncAfter(deadline: .now() + sidebarAnimationDuration + 0.03) {
-                guard generation == chatInsetCommitGeneration else { return }
-                chatInsetActive = true
-            }
-        } else {
-            chatInsetActive = false
-        }
-    }
-
-    private func setSidebarVisible(_ visible: Bool) {
-        cancelPendingSidebarReveal()
-        sidebarAutoCollapsedForCompact = false
-        sidebarHoverRevealed = false
-        withAnimation(sidebarAnimation) {
-            model.sidebarVisible = visible
-        }
-    }
-
-    private func scheduleSidebarReveal() {
-        guard NSApp.isActive, !model.sidebarVisible, !sidebarHoverRevealed else { return }
-        cancelPendingSidebarReveal()
-        let workItem = DispatchWorkItem {
-            guard NSApp.isActive, !model.sidebarVisible else { return }
-            withAnimation(sidebarAnimation) {
-                sidebarHoverRevealed = true
-            }
-        }
-        sidebarRevealWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: workItem)
-    }
-
-    private func cancelPendingSidebarReveal() {
-        sidebarRevealWorkItem?.cancel()
-        sidebarRevealWorkItem = nil
-    }
-
-    private func syncSidebarVisibilityForCompact(_ compact: Bool) {
-        if compact, model.sidebarVisible, !sidebarAutoCollapsedForCompact {
-            sidebarAutoCollapsedForCompact = true
-            model.sidebarVisible = false
-        } else if !compact, sidebarAutoCollapsedForCompact {
-            sidebarAutoCollapsedForCompact = false
-            model.sidebarVisible = true
-        }
-    }
-
-    private func hideCollapsedSidebarDrawerIfNeeded(compact: Bool) {
-        guard sidebarHoverRevealed || (compact && model.sidebarVisible) else { return }
-        withAnimation(sidebarAnimation) {
-            sidebarHoverRevealed = false
-            if compact, model.sidebarVisible {
-                sidebarAutoCollapsedForCompact = true
-                model.sidebarVisible = false
-            }
         }
     }
 }
@@ -597,7 +408,7 @@ struct SessionsSidebarContent: View {
             .accessibilityLabel("Open Settings")
             Spacer(minLength: 0)
             AppUpdateButton(updates: model.appUpdates)
-            SidebarUpdateButton(maintenance: model.piMaintenance)
+            PiUpdateButton(maintenance: model.piMaintenance)
             Button {
                 model.undoLastInboxDismissal()
             } label: {
@@ -749,7 +560,7 @@ private struct ExtensionOrStatusToast: View {
 }
 
 /// Shown when a newer PiG release exists on GitHub; opens its release page.
-private struct AppUpdateButton: View {
+struct AppUpdateButton: View {
     @ObservedObject var updates: AppUpdateChecker
 
     var body: some View {
@@ -775,7 +586,7 @@ private struct AppUpdateButton: View {
 /// the Undo button. Opens the existing update review sheet; changelog and
 /// update actions live there. When only the installed notice remains (nothing
 /// to download), it shows an info icon that opens the changelog instead.
-private struct SidebarUpdateButton: View {
+struct PiUpdateButton: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject var maintenance: PiMaintenanceController
 

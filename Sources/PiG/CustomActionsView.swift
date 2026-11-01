@@ -168,7 +168,7 @@ struct TitlebarIconButtonStyle: ButtonStyle {
     }
 }
 
-private struct TitlebarTerminalButton: View {
+struct TitlebarTerminalButton: View {
     @State private var isSplitActive = false
 
     var body: some View {
