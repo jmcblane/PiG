@@ -263,6 +263,10 @@ enum SessionParser {
             return ChatMessage(id: id, role: .system, tools: [tool], timestamp: timestamp, isStreaming: streaming)
         case "custom":
             if message["display"] as? Bool == false { return nil }
+            if message["customType"] as? String == "background-job",
+               let jobMessage = backgroundJobMessage(id: id, content: message["content"], details: message["details"], timestamp: timestamp, streaming: streaming) {
+                return jobMessage
+            }
             return ChatMessage(id: id, role: .custom, text: contentText(message["content"]), timestamp: timestamp, isStreaming: streaming)
         case "branchSummary":
             return ChatMessage(id: id, role: .system, text: "Branch summary\n\n\(message["summary"] as? String ?? "")", timestamp: timestamp, isStreaming: streaming)
@@ -441,12 +445,52 @@ enum SessionParser {
                 messages.append(ChatMessage(id: entry.id ?? UUID().uuidString, role: .system, text: "Branch summary\n\n\(summary)", timestamp: entry.timestamp))
             case "custom_message":
                 if entry.dict["display"] as? Bool == false { continue }
-                messages.append(ChatMessage(id: entry.id ?? UUID().uuidString, role: .custom, text: contentText(entry.dict["content"]), timestamp: entry.timestamp))
+                let id = entry.id ?? UUID().uuidString
+                if entry.dict["customType"] as? String == "background-job",
+                   let jobMessage = backgroundJobMessage(id: id, content: entry.dict["content"], details: entry.dict["details"], timestamp: entry.timestamp) {
+                    messages.append(jobMessage)
+                    continue
+                }
+                messages.append(ChatMessage(id: id, role: .custom, text: contentText(entry.dict["content"]), timestamp: entry.timestamp))
             default:
                 continue
             }
         }
         return messages
+    }
+
+    /// Splits a `background-job` message from the `background` extension into one
+    /// tool row per job. Each `details.jobs[]` entry counts its content blocks in
+    /// `parts`, starting with a header line meant for the model.
+    static func backgroundJobMessage(id: String, content: Any?, details: Any?, timestamp: Date?, streaming: Bool = false) -> ChatMessage? {
+        guard let jobs = (details as? [String: Any])?["jobs"] as? [[String: Any]],
+              let blocks = content as? [[String: Any]] else { return nil }
+        var offset = 0
+        var tools: [ToolDisplay] = []
+        for (index, job) in jobs.enumerated() {
+            let parts = max(1, job["parts"] as? Int ?? 1)
+            let output = Array(blocks.dropFirst(offset + 1).prefix(parts - 1))
+            offset += parts
+            let jobID = job["id"] as? Int ?? index + 1
+            let status = job["status"] as? String ?? "ok"
+            let failed = status != "ok"
+            tools.append(ToolDisplay(
+                id: "\(id)-job-\(jobID)",
+                name: job["tool"] as? String ?? "tool",
+                arguments: job["args"].map(jsonString) ?? "",
+                result: contentText(output),
+                details: job["details"].flatMap { $0 is NSNull ? nil : jsonString($0) },
+                images: contentImages(output),
+                status: failed ? .failed : .succeeded,
+                isError: failed,
+                backgroundJob: BackgroundJobInfo(
+                    id: jobID,
+                    duration: (job["durationMs"] as? Double).map { $0 / 1000 }
+                )
+            ))
+        }
+        guard !tools.isEmpty else { return nil }
+        return ChatMessage(id: id, role: .custom, tools: tools, timestamp: timestamp, isStreaming: streaming)
     }
 
     static func shellExitFailed(_ value: Any?) -> Bool {

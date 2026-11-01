@@ -97,6 +97,13 @@ final class SessionController: ObservableObject, Identifiable {
     @Published private(set) var extensionUIPrompt: ExtensionUIPrompt?
     @Published private(set) var extensionUINotifications: [ExtensionUINotification] = []
     @Published private(set) var extensionUIStatuses: [String: String] = [:]
+    @Published private(set) var claudeBridgeUsageHeaders: String?
+
+    var claudeBridgeUsage: UsageLimitSnapshot? {
+        claudeBridgeUsageHeaders.flatMap { ClaudeBridgeUsageService.snapshot(from: $0) }
+    }
+    /// Live state of tools run by `background` jobs, keyed by the `background` call id.
+    @Published private(set) var backgroundJobTools: [String: ToolDisplay] = [:]
     @Published private(set) var extensionUIWidgets: [String: ExtensionUIWidget] = [:]
     @Published private(set) var extensionWindowTitle: String?
     @Published var messageScrollRequest: MessageScrollRequest?
@@ -233,6 +240,10 @@ final class SessionController: ObservableObject, Identifiable {
     var canAbort: Bool { isProcessActive && (isWorking || isThinking || isCompacting) }
     var hasRuntimeOrStartup: Bool { isProcessActive || rpcStartupTask != nil }
     var showsActivityIndicator: Bool { isWorking || isThinking || isCompacting }
+    /// Set while the `background` extension reports running jobs through its status.
+    var hasBackgroundJobs: Bool { extensionUIStatuses["background"] != nil }
+    /// Work that stopping the pi process would kill: an active run or background jobs.
+    var hasLiveWork: Bool { showsActivityIndicator || hasBackgroundJobs }
     var hiddenMessageCount: Int { max(0, messages.count - visibleMessageLimit) }
     var visibleMessages: [ChatMessage] { Array(messages.suffix(visibleMessageLimit)) }
 
@@ -391,6 +402,10 @@ final class SessionController: ObservableObject, Identifiable {
             // toast) so hovering/keyboard focus can pause it.
         case "setStatus":
             guard let key = request["statusKey"] as? String else { return }
+            if key == "pig:claude-usage" {
+                claudeBridgeUsageHeaders = request["statusText"] as? String
+                return
+            }
             if let text = request["statusText"] as? String, !text.isEmpty {
                 extensionUIStatuses[key] = clean(text)
             } else {
@@ -470,6 +485,7 @@ final class SessionController: ObservableObject, Identifiable {
         extensionUIPromptQueue.removeAll()
         extensionUIPrompt = nil
         extensionUIStatuses.removeAll()
+        claudeBridgeUsageHeaders = nil
         extensionUIWidgets.removeAll()
         extensionWindowTitle = nil
         eventHandler(.extensionUIChanged)
@@ -498,6 +514,7 @@ final class SessionController: ObservableObject, Identifiable {
         rpcStartupTask = nil
         startupTask?.cancel()
         resetStreamingState()
+        backgroundJobTools.removeAll()
         rpc?.stop()
         rpc = nil
         markRPCInactive()
@@ -645,7 +662,14 @@ final class SessionController: ObservableObject, Identifiable {
                     "message": prepared.payload
                 ]
             } else {
-                command = ["type": "prompt", "message": prepared.payload]
+                // Extensions can start a run while PiG believes pi is idle (for example
+                // a finished background job). Pi rejects a prompt during a run unless it
+                // names a streaming behavior; when idle, the field is ignored.
+                command = [
+                    "type": "prompt",
+                    "message": prepared.payload,
+                    "streamingBehavior": requestFollowUp ? "followUp" : "steer"
+                ]
             }
             if !images.isEmpty { command["images"] = images.compactMap(\.rpcValue) }
             guard let rpc else { throw PiRPCClient.RPCError.notRunning }
@@ -1237,6 +1261,10 @@ final class SessionController: ObservableObject, Identifiable {
     }
 
     private func handleReloadSlash() async -> Bool {
+        guard !hasBackgroundJobs else {
+            addSystemNotice(backgroundJobsNotice)
+            return false
+        }
         stopRPC()
         return await withSlashRPC { _ in
             await refreshSlashCommands()
@@ -1247,9 +1275,17 @@ final class SessionController: ObservableObject, Identifiable {
         }
     }
 
+    private var backgroundJobsNotice: String {
+        "Background jobs are running. Wait for them or cancel with `/jobs cancel all`."
+    }
+
     private func handleUnloadSlash() -> Bool {
         guard !showsActivityIndicator else {
             addSystemNotice("Cannot unload while the agent is working. Abort or wait for completion.")
+            return false
+        }
+        guard !hasBackgroundJobs else {
+            addSystemNotice(backgroundJobsNotice)
             return false
         }
         guard isProcessActive else {
@@ -1860,8 +1896,12 @@ final class SessionController: ObservableObject, Identifiable {
     func receiveRPCEvent(_ event: [String: Any]) {
         guard let type = event["type"] as? String else { return }
         // Nested calls (e.g. from codemode scripts) are reported by their parent
-        // tool and never appear in the transcript.
-        if type.hasPrefix("tool_execution_"), event["parentToolCallId"] != nil { return }
+        // tool and never appear in the transcript, except the tool a `background`
+        // job runs: it outlives its parent call, so it gets its own live row.
+        if type.hasPrefix("tool_execution_"), let parentID = event["parentToolCallId"] as? String {
+            updateBackgroundJobRow(event, type: type, parentID: parentID)
+            return
+        }
         recoveryRevision &+= 1
         defer { updateRecoveryTimer() }
         switch type {
@@ -2034,9 +2074,60 @@ final class SessionController: ObservableObject, Identifiable {
         } else if role == "custom" {
             guard let message = (event["_pigParsedChatMessage"] as? ChatMessage)
                 ?? SessionParser.chatMessage(fromAgentMessage: agent, streaming: false) else { return }
+            if message.isBackgroundJobResult {
+                // The result message now carries these jobs; drop their live state. A job
+                // that ended before PiG saw its number (id 0) is dropped once finished.
+                let jobIDs = Set(message.tools.compactMap { $0.backgroundJob?.id })
+                backgroundJobTools = backgroundJobTools.filter { _, tool in
+                    let id = tool.backgroundJob?.id ?? 0
+                    return !(jobIDs.contains(id) || (id == 0 && tool.status != .running))
+                }
+            }
             messages.append(message)
             bottomScrollRequest += 1
         }
+    }
+
+    /// Tracks the tool a `background` job runs. Its events carry the `background` call
+    /// as parent and keep arriving after that call and its turn have ended. The
+    /// transcript shows this state on the `background` row. Deeper nested calls stay hidden.
+    private func updateBackgroundJobRow(_ event: [String: Any], type: String, parentID: String) {
+        guard let parent = findTool(parentID), parent.name == "background" else { return }
+        // The job number is in the `background` result, which can arrive after the job starts.
+        let parentDetails = parent.details
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let jobID = parentDetails?["id"] as? Int ?? 0
+        var payload: [String: Any]?
+        var status = ToolStatus.running
+        var isError = false
+        switch type {
+        case "tool_execution_update":
+            payload = event["partialResult"] as? [String: Any]
+        case "tool_execution_end":
+            payload = event["result"] as? [String: Any]
+            isError = event["isError"] as? Bool ?? false
+            status = isError ? .failed : .succeeded
+        default:
+            break
+        }
+        let old = backgroundJobTools[parentID]
+        let images = SessionParser.contentImages(payload?["content"])
+        backgroundJobTools[parentID] = ToolDisplay(
+            id: parentID,
+            name: event["toolName"] as? String ?? old?.name ?? "tool",
+            arguments: event["args"].map(jsonString) ?? old?.arguments ?? "",
+            result: payload.map { SessionParser.contentText($0["content"]) } ?? old?.result ?? "",
+            details: payload?["details"].map(jsonString) ?? old?.details,
+            images: images.isEmpty ? old?.images ?? [] : images,
+            status: status,
+            isError: isError,
+            backgroundJob: BackgroundJobInfo(
+                id: jobID,
+                startedAt: old?.backgroundJob?.startedAt ?? Date()
+            )
+        )
+        streamingFrameToken += 1
     }
 
     private func clearStreamingAccumulator() {

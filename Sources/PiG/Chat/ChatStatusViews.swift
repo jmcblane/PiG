@@ -5,6 +5,7 @@ import ImageIO
 struct UsageLimitIndicator: View {
     @Environment(\.appTheme) private var appTheme
     let snapshot: UsageLimitSnapshot?
+    var pendingText = "Loading…"
     let refresh: () -> Void
     @State private var hovering = false
 
@@ -27,7 +28,7 @@ struct UsageLimitIndicator: View {
         .buttonStyle(.plain)
         .overlay(alignment: .bottomTrailing) {
             if hovering {
-                UsageLimitPopup(snapshot: snapshot)
+                UsageLimitPopup(snapshot: snapshot, pendingText: pendingText)
                     .offset(y: -16)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
@@ -52,6 +53,7 @@ struct UsageLimitIndicator: View {
 struct UsageLimitPopup: View {
     @Environment(\.appTheme) private var appTheme
     let snapshot: UsageLimitSnapshot?
+    var pendingText = "Loading…"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -62,8 +64,13 @@ struct UsageLimitPopup: View {
                 ForEach(snapshot.details, id: \.self) { window in
                     popupRow(window)
                 }
+                if snapshot.details.isEmpty {
+                    Text(pendingText)
+                        .font(AppFonts.ui(11.5))
+                        .foregroundStyle(appTheme.muted)
+                }
             } else {
-                Text(snapshot?.error ?? "Loading…")
+                Text(snapshot?.error ?? pendingText)
                     .font(AppFonts.ui(11.5))
                     .foregroundStyle(appTheme.danger)
                     .lineLimit(2)

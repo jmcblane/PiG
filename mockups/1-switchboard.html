@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PiG — Switchboard</title>
+<style>
+  :root {
+    --bg: #1d2129;
+    --rail: #181b22;
+    --lane: #232832;
+    --lane-hi: #282e3a;
+    --line: #333a47;
+    --ink: #e4e8ef;
+    --ink-2: #a3acbb;
+    --ink-3: #6c7586;
+    --work: #4fc4cf;
+    --wait: #f2b544;
+    --done: #a68cff;
+    --err: #ff6b6b;
+    --term: #7fd18b;
+    --proj-pig: #5aa2ff;
+    --proj-agents: #ff8f6b;
+    --proj-bible: #c9a5ff;
+    --mono: "SF Mono", Menlo, monospace;
+    --ui: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0f1115; font: 13px/1.45 var(--ui); color: var(--ink); }
+  body { display: grid; place-items: center; padding: 24px; }
+
+  .win {
+    width: min(1440px, 100%); height: min(900px, calc(100vh - 48px));
+    display: grid; grid-template-columns: 56px 1fr; grid-template-rows: 40px 1fr auto;
+    background: var(--bg); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 0 0 1px #000, 0 30px 80px -20px rgba(0,0,0,.7);
+  }
+
+  /* title bar */
+  .titlebar {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 14px;
+    padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--rail);
+  }
+  .lights { display: flex; gap: 8px; width: 60px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+  .tally { display: flex; gap: 16px; color: var(--ink-2); font-size: 12px; }
+  .tally span { display: flex; align-items: center; gap: 6px; }
+  .tally b { color: var(--ink); font-weight: 600; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .spacer { flex: 1; }
+  .icon-btn {
+    width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px;
+    color: var(--ink-2); background: none; border: 0; cursor: pointer;
+  }
+  .icon-btn:hover { background: var(--lane); color: var(--ink); }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .meters { display: flex; gap: 10px; align-items: center; margin-right: 6px; }
+  .meter { display: grid; gap: 2px; width: 44px; }
+  .meter small { font-size: 10px; color: var(--ink-3); }
+  .meter div { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .meter div i { display: block; height: 100%; background: var(--ink-2); }
+
+  /* rail */
+  .rail {
+    background: var(--rail); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 0;
+  }
+  .proj {
+    width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+    font-weight: 700; font-size: 13px; color: #0f1115; cursor: pointer; position: relative;
+    opacity: .55; transition: opacity .15s;
+  }
+  .proj.on, .proj:hover { opacity: 1; }
+  .proj .n {
+    position: absolute; right: -4px; bottom: -4px; min-width: 15px; height: 15px; padding: 0 3px;
+    border-radius: 8px; background: var(--rail); color: var(--ink); font-size: 9px;
+    display: grid; place-items: center; box-shadow: 0 0 0 1.5px var(--rail);
+  }
+  .rail hr { width: 24px; border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+  .rail .agent { width: 34px; height: 34px; border-radius: 9px; overflow: hidden; opacity: .8; cursor: pointer; }
+  .rail .agent:hover { opacity: 1; }
+  .rail .bottom { margin-top: auto; }
+
+  /* board */
+  .board {
+    display: flex; gap: 1px; background: var(--line); overflow-x: auto; min-height: 0;
+  }
+  .lane {
+    flex: 0 0 250px; display: flex; flex-direction: column; min-height: 0;
+    background: var(--lane); cursor: pointer; transition: flex-basis .28s cubic-bezier(.3,.7,.2,1);
+    position: relative;
+  }
+  .lane.focused { flex: 1 0 520px; background: var(--bg); cursor: default; }
+  .lane::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--proj);
+  }
+  .lane-head { padding: 12px 14px 10px; display: grid; gap: 6px; border-bottom: 1px solid var(--line); }
+  .lane-title { display: flex; align-items: center; gap: 8px; }
+  .lane-title h2 { margin: 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .lane-sub { display: flex; gap: 10px; color: var(--ink-3); font-size: 11.5px; align-items: center; }
+  .lane-sub .proj-name { color: var(--proj); }
+  .ctx { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .ctx i { display: block; height: 100%; background: var(--ink-3); }
+  .lane.focused .ctx i { background: var(--work); }
+
+  .status { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .lane[data-state=working] .status { background: var(--work); box-shadow: 0 0 0 0 var(--work); animation: ping 1.6s infinite; }
+  .lane[data-state=waiting] .status { background: var(--wait); }
+  .lane[data-state=done] .status { background: var(--done); }
+  .lane[data-state=idle] .status { background: var(--ink-3); }
+  .lane[data-state=term] .status { background: var(--term); border-radius: 2px; }
+  @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(79,196,207,.6); } 100% { box-shadow: 0 0 0 7px rgba(79,196,207,0); } }
+
+  .lane-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .lane:not(.focused) .lane-body { gap: 8px; color: var(--ink-2); font-size: 12px; }
+  .lane:not(.focused) .full { display: none; }
+  .lane.focused .peek { display: none; }
+
+  .msg-user { color: var(--ink); background: var(--lane-hi); border-radius: 8px; padding: 9px 12px; align-self: flex-start; max-width: 90%; }
+  .msg-ai { max-width: 68ch; color: var(--ink); }
+  .msg-ai p { margin: 0 0 8px; }
+  .msg-ai code { font: 12px var(--mono); background: var(--lane-hi); padding: 1px 4px; border-radius: 4px; color: var(--work); }
+  .tools { display: grid; gap: 2px; font: 11.5px/1.6 var(--mono); color: var(--ink-3); border-left: 2px solid var(--line); padding-left: 10px; }
+  .tools .t { display: flex; gap: 8px; }
+  .tools .t b { color: var(--ink-2); font-weight: 500; width: 36px; }
+  .tools .t.live { color: var(--work); }
+  .tools .t.live b { color: var(--work); }
+  .spin { display: inline-block; width: 9px; height: 9px; border: 1.5px solid var(--work); border-right-color: transparent; border-radius: 50%; animation: r .8s linear infinite; vertical-align: -1px; }
+  @keyframes r { to { transform: rotate(360deg); } }
+  .thinking { color: var(--ink-3); font-style: italic; }
+
+  .ask { border: 1px solid var(--wait); border-radius: 8px; padding: 10px 12px; color: var(--ink); background: rgba(242,181,68,.06); display: grid; gap: 8px; }
+  .ask code { font: 11.5px var(--mono); color: var(--wait); }
+  .ask .row { display: flex; gap: 6px; }
+  .btn { font: 12px var(--ui); border-radius: 6px; padding: 5px 10px; border: 1px solid var(--line); background: var(--lane-hi); color: var(--ink); cursor: pointer; }
+  .btn.primary { background: var(--wait); color: #1d1606; border-color: var(--wait); font-weight: 600; }
+  .btn:hover { filter: brightness(1.1); }
+  .resolved { color: var(--ink-3); font-size: 12px; }
+
+  .peek-last { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+  .unread { color: var(--done); font-size: 11.5px; }
+
+  .term { font: 12px/1.55 var(--mono); color: #c9d4c5; white-space: pre; }
+  .term .p { color: var(--term); }
+  .term .dim { color: var(--ink-3); }
+
+  .lane.new {
+    flex: 0 0 64px; background: var(--bg); display: grid; place-items: center; color: var(--ink-3);
+  }
+  .lane.new::before { display: none; }
+  .lane.new:hover { color: var(--ink); background: var(--lane); }
+
+  /* composer */
+  .composer { grid-column: 2; border-top: 1px solid var(--line); padding: 10px 16px 14px; display: grid; gap: 8px; background: var(--bg); }
+  .queue { display: grid; gap: 4px; }
+  .queue .q { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--ink-2); }
+  .queue .q svg { width: 12px; height: 12px; color: var(--ink-3); }
+  .field { display: flex; align-items: flex-start; gap: 10px; background: var(--lane); border: 1px solid var(--line); border-radius: 10px; padding: 10px 10px 10px 12px; }
+  .field:focus-within { border-color: #4a5466; }
+  .target { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); padding-top: 2px; white-space: nowrap; border-right: 1px solid var(--line); padding-right: 10px; cursor: pointer; }
+  .target .status { width: 7px; height: 7px; }
+  textarea { flex: 1; resize: none; border: 0; outline: 0; background: none; color: var(--ink); font: 14px/1.45 var(--ui); height: 22px; padding: 1px 0 0; }
+  textarea::placeholder { color: var(--ink-3); }
+  .send { width: 28px; height: 28px; border-radius: 7px; border: 0; background: var(--work); color: #0d2427; display: grid; place-items: center; cursor: pointer; }
+  .send svg { width: 15px; height: 15px; }
+  .composer-foot { display: flex; gap: 14px; color: var(--ink-3); font-size: 11.5px; padding: 0 2px; align-items: center; }
+  .composer-foot button { background: none; border: 0; color: var(--ink-2); font: inherit; cursor: pointer; padding: 0; display: flex; gap: 5px; align-items: center; }
+  .composer-foot button:hover { color: var(--ink); }
+  .composer-foot svg { width: 13px; height: 13px; }
+  kbd { font: 10.5px var(--mono); color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+</style>
+</head>
+<body>
+<div class="win">
+  <header class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="tally">
+      <span><i class="dot" style="background:var(--work)"></i><b>2</b> working</span>
+      <span><i class="dot" style="background:var(--wait)"></i><b>1</b> needs you</span>
+      <span><i class="dot" style="background:var(--done)"></i><b>1</b> unread</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="meters" title="Usage limits">
+      <div class="meter"><small>Claude</small><div><i style="width:62%"></i></div></div>
+      <div class="meter"><small>Codex</small><div><i style="width:28%"></i></div></div>
+    </div>
+    <button class="icon-btn" title="Search all sessions (⌘F)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg></button>
+    <button class="icon-btn" title="Custom actions"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z"/></svg></button>
+    <button class="icon-btn" title="Settings"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg></button>
+  </header>
+
+  <nav class="rail">
+    <div class="proj on" style="background:var(--proj-pig)" title="pig">P<span class="n">2</span></div>
+    <div class="proj on" style="background:var(--proj-agents)" title="PiAgents">A<span class="n">1</span></div>
+    <div class="proj" style="background:var(--proj-bible)" title="Bible_App">B</div>
+    <div class="proj" style="background:#3a4150;color:var(--ink)" title="Quick chats"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z"/></svg></div>
+    <hr>
+    <div class="agent" title="Researcher"><svg data-avatar="0" viewBox="0 0 10 10"></svg></div>
+    <div class="agent" title="Hermes (remote)"><svg data-avatar="1" viewBox="0 0 10 10"></svg></div>
+    <div class="bottom icon-btn" title="Archive"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="3" rx="1"/><path d="M3 6v7h10V6M6.5 9h3"/></svg></div>
+  </nav>
+
+  <main class="board" id="board">
+    <section class="lane focused" data-state="working" style="--proj:var(--proj-pig)">
+      <div class="lane-head">
+        <div class="lane-title"><span class="status"></span><h2>Fix squashed new-thread rows</h2></div>
+        <div class="lane-sub"><span class="proj-name">pig</span><span>Opus 5.5</span><span>high</span><span class="spacer"></span><span>48k / 200k</span></div>
+        <div class="ctx"><i style="width:24%"></i></div>
+      </div>
+      <div class="lane-body">
+        <div class="peek"><div class="peek-last">Reading SidebarRow.swift… the row height is computed before the title wraps.</div></div>
+        <div class="full msg-user">New threads in the sidebar look squashed until I resize the window. Can you find out why?</div>
+        <div class="full tools">
+          <div class="t"><b>rg</b>"SidebarRow" Sources/PiG</div>
+          <div class="t"><b>read</b>Sources/PiG/RootView.swift</div>
+          <div class="t"><b>read</b>Sources/PiG/App/SessionScanner.swift</div>
+        </div>
+        <div class="full msg-ai">
+          <p>The row height is computed once in <code>SidebarRow.init</code>, before the generated title arrives. When the title changes from “New chat” to two lines, the cached height stays at one line.</p>
+          <p>I’ll invalidate the height when <code>session.title</code> changes, then build to confirm.</p>
+        </div>
+        <div class="full tools">
+          <div class="t"><b>edit</b>Sources/PiG/RootView.swift  +6 −2</div>
+          <div class="t live"><b>bash</b>swift build  <span class="spin"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="lane" data-state="waiting" style="--proj:var(--proj-agents)">
+      <div class="lane-head">
+        <div class="lane-title"><span class="status"></span><h2>Hermes auth storage</h2></div>
+        <div class="lane-sub"><span class="proj-name">PiAgents</span><span>GPT-6.1</span></div>
+        <div class="ctx"><i style="width:61%"></i></div>
+      </div>
+      <div class="lane-body">
+        <div class="peek-last">Moved tokens into the Keychain. Old plaintext file still exists.</div>
+        <div class="ask" data-ask>
+          <div>Delete <code>~/.hermes/auth.json</code>?</div>
+          <div class="row"><button class="btn primary" data-answer="Deleted">Delete</button><button class="btn" data-answer="Kept">Keep</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="lane" data-state="done" style="--proj:var(--proj-pig)">
+      <div class="lane-head">
+        <div class="lane-title"><span class="status"></span><h2>Native terminal options</h2></div>
+        <div class="lane-sub"><span class="proj-name">pig</span><span>Sonnet 5.5</span></div>
+        <div class="ctx"><i style="width:38%"></i></div>
+      </div>
+      <div class="lane-body">
+        <div class="unread">Finished 3 min ago</div>
+        <div class="peek-last">SwiftTerm is the best fit: it’s pure Swift, already handles resize and themes, and embeds as an NSView. Ghostty’s library isn’t stable yet.</div>
+      </div>
+    </section>
+
+    <section class="lane" data-state="term" style="--proj:var(--proj-pig)">
+      <div class="lane-head">
+        <div class="lane-title"><span class="status"></span><h2>zsh</h2></div>
+        <div class="lane-sub"><span class="proj-name">pig</span><span>~/AI/pig</span></div>
+      </div>
+      <div class="lane-body">
+<div class="term"><span class="p">❯</span> git status -s
+<span class="dim"> M Sources/PiG/RootView.swift</span>
+<span class="p">❯</span> swift test
+<span class="dim">Test Suite 'All tests' passed
+  Executed 14 tests, 0 failures</span>
+<span class="p">❯</span> ▍</div>
+      </div>
+    </section>
+
+    <section class="lane new" title="New session (⌘N)">
+      <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>
+    </section>
+  </main>
+
+  <footer class="composer">
+    <div class="queue" id="queue">
+      <div class="q"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10M3 8h10M3 12h6"/></svg>Also check the dark-mode row background while you’re there.</div>
+    </div>
+    <div class="field">
+      <div class="target" id="target" title="Tab to change lane"><span class="status" style="background:var(--work)"></span><span id="target-name">Fix squashed new-thread rows</span></div>
+      <textarea id="input" placeholder="Steer, or queue a follow-up"></textarea>
+      <button class="send" title="Send"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></button>
+    </div>
+    <div class="composer-foot">
+      <button title="Model (⌘1–⌘5)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="10" height="10" rx="2"/><path d="M6 6h4v4H6z"/></svg>Opus 5.5</button>
+      <button title="Thinking level"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12h2V9H3zM7 12h2V6H7zM11 12h2V3h-2z"/></svg>High</button>
+      <button title="Extensions & skills"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 2.5h4v3h3v4h-3v4H6v-4H3v-4h3z"/></svg>4</button>
+      <button title="Attach image"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="6" cy="6.5" r="1.2"/><path d="m2.5 12 4-4 3 3 2-2 2 2"/></svg></button>
+      <span class="spacer"></span>
+      <span><kbd>Tab</kbd> lane</span>
+      <span><kbd>⌥↑</kbd> edit queued</span>
+    </div>
+  </footer>
+</div>
+
+<script>
+  // Pixel avatars: 10×10 head maps. h hair, s skin, e eye, c shirt
+  const looks = [
+    { hair: "#3b2a20", skin: "#f1c7a3", shirt: "#4fc4cf" },
+    { hair: "#d9d2c5", skin: "#a8724f", shirt: "#ff8f6b" },
+  ];
+  const map = [
+    "..hhhhhh..",
+    ".hhhhhhhh.",
+    ".hssssssh.",
+    ".sesssess.",
+    ".ssssssss.",
+    "..ssmmss..",
+    "...ssss...",
+    "..cccccc..",
+    ".cccccccc.",
+    "cccccccccc",
+  ];
+  document.querySelectorAll("[data-avatar]").forEach(svg => {
+    const l = looks[+svg.dataset.avatar];
+    const col = { h: l.hair, s: l.skin, e: "#1d2129", m: "#b45a5a", c: l.shirt };
+    svg.style.background = l.shirt + "33";
+    svg.setAttribute("shape-rendering", "crispEdges");
+    map.forEach((row, y) => [...row].forEach((ch, x) => {
+      if (ch === ".") return;
+      const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      Object.entries({ x, y, width: 1, height: 1, fill: col[ch] }).forEach(([k, v]) => r.setAttribute(k, v));
+      svg.appendChild(r);
+    }));
+  });
+
+  const lanes = [...document.querySelectorAll(".lane:not(.new)")];
+  const targetName = document.getElementById("target-name");
+  const targetDot = document.querySelector("#target .status");
+  const stateColor = { working: "var(--work)", waiting: "var(--wait)", done: "var(--done)", idle: "var(--ink-3)", term: "var(--term)" };
+
+  function focusLane(lane) {
+    lanes.forEach(l => l.classList.toggle("focused", l === lane));
+    targetName.textContent = lane.querySelector("h2").textContent;
+    targetDot.style.background = stateColor[lane.dataset.state];
+    if (lane.dataset.state === "done") {
+      lane.dataset.state = "idle";
+      lane.querySelector(".unread")?.remove();
+    }
+  }
+  lanes.forEach(l => l.addEventListener("click", e => {
+    if (e.target.closest("button")) return;
+    focusLane(l);
+  }));
+
+  // Answer extension prompts in place, without switching lanes
+  document.querySelectorAll("[data-ask] button").forEach(b => b.addEventListener("click", () => {
+    const ask = b.closest("[data-ask]");
+    const lane = b.closest(".lane");
+    ask.outerHTML = `<div class="resolved">${b.dataset.answer} auth.json</div>`;
+    lane.dataset.state = "working";
+  }));
+
+  const input = document.getElementById("input");
+  input.addEventListener("keydown", e => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const i = lanes.findIndex(l => l.classList.contains("focused"));
+      focusLane(lanes[(i + (e.shiftKey ? lanes.length - 1 : 1)) % lanes.length]);
+    }
+    if (e.key === "Enter" && !e.shiftKey && input.value.trim()) {
+      e.preventDefault();
+      const lane = lanes.find(l => l.classList.contains("focused"));
+      const q = document.createElement("div");
+      q.className = "q";
+      q.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10M3 8h10M3 12h6"/></svg>${input.value.replace(/</g, "&lt;")} <span style="color:var(--ink-3)">(${lane.querySelector("h2").textContent})</span>`;
+      document.getElementById("queue").appendChild(q);
+      input.value = "";
+    }
+  });
+</script>
+</body>
+</html>

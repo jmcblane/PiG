@@ -20,11 +20,29 @@ protocol ChatTranscriptSource: ObservableObject {
     var bottomScrollRequest: Int { get }
     /// Receives HTML widget actions; nil disables them.
     var htmlActionTarget: SessionController? { get }
+    /// Live tools of running `background` jobs, keyed by the `background` call id.
+    var backgroundJobTools: [String: ToolDisplay] { get }
+}
+
+extension ChatTranscriptSource {
+    var backgroundJobTools: [String: ToolDisplay] { [:] }
 }
 
 extension SessionController: ChatTranscriptSource {
     var transcriptProjectPath: String? { projectPath }
     var htmlActionTarget: SessionController? { self }
+}
+
+private struct RevealMessageKey: EnvironmentKey {
+    static let defaultValue: ((String) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    /// Scrolls the transcript to a message and highlights it.
+    var revealMessage: ((String) -> Void)? {
+        get { self[RevealMessageKey.self] }
+        set { self[RevealMessageKey.self] = newValue }
+    }
 }
 
 struct ChatScrollView<Controller: ChatTranscriptSource>: View {
@@ -47,12 +65,18 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
         return "Streaming"
     }
 
+    private func reveal(_ messageID: String) {
+        guard let session = controller as? SessionController else { return }
+        Task { await session.revealMessage(entryID: messageID) }
+    }
+
     private var transcriptPresentation: TranscriptToolPresentation {
         TranscriptToolPresentation(
             messages: controller.messages,
             visibleMessages: controller.visibleMessages,
             isAgentActive: controller.isWorking,
-            showThinkingTraces: model.showThinkingTraces
+            showThinkingTraces: model.showThinkingTraces,
+            backgroundJobTools: controller.backgroundJobTools
         )
     }
 
@@ -122,11 +146,22 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                                         ChatMessageScrollAnchor(messageID: messageID)
                                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                                     }
+                            case .backgroundJobResult(let message):
+                                BackgroundJobResultView(
+                                    message: message,
+                                    projectPath: controller.transcriptProjectPath,
+                                    isHighlighted: highlightedMessageID == message.id
+                                )
+                                .background {
+                                    ChatMessageScrollAnchor(messageID: message.id)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                }
                             case .anchor(let messageID):
                                 ChatMessageScrollAnchor(messageID: messageID)
                                     .frame(height: 0)
                             }
                         }
+                        .environment(\.revealMessage, reveal)
                         // controller.errorText surfaces via the arbitrated root toast
                         // plus the 'Last error' affordance near the composer.
                     }
@@ -251,6 +286,7 @@ private enum TranscriptPresentationItem: Identifiable {
     case toolGroup(ToolPresentationGroup)
     case htmlArtifact(HTMLArtifact)
     case userTools(messageID: String, tools: [ToolDisplay])
+    case backgroundJobResult(ChatMessage)
     case anchor(String)
 
     var id: String {
@@ -259,8 +295,65 @@ private enum TranscriptPresentationItem: Identifiable {
         case .toolGroup(let group): return group.id
         case .htmlArtifact(let artifact): return "html-artifact-\(artifact.id)"
         case .userTools(let messageID, _): return "user-tools-\(messageID)"
+        case .backgroundJobResult(let message): return "background-job-\(message.id)"
         case .anchor(let messageID): return "anchor-\(messageID)"
         }
+    }
+}
+
+/// Shows each `background` call as the job it started: live while it runs (state from
+/// `SessionController`), then finished, pointing at the message that delivered its result.
+private struct BackgroundJobRows {
+    private let live: [String: ToolDisplay]
+    /// Finished job tools by `background` call id, with the id of their result message.
+    private var finished: [String: (tool: ToolDisplay, messageID: String)] = [:]
+
+    init(messages: [ChatMessage], live: [String: ToolDisplay]) {
+        self.live = live
+        // Job numbers restart with each pi process, so pair every result with the
+        // most recent unanswered `background` call that has its number.
+        var pending: [Int: String] = [:]
+        for message in messages {
+            for tool in message.tools where tool.name == "background" {
+                if let id = Self.jobID(of: tool) { pending[id] = tool.id }
+            }
+            guard message.isBackgroundJobResult else { continue }
+            for tool in message.tools {
+                if let id = tool.backgroundJob?.id, let callID = pending.removeValue(forKey: id) {
+                    finished[callID] = (tool, message.id)
+                }
+            }
+        }
+    }
+
+    func apply(_ messages: [ChatMessage]) -> [ChatMessage] {
+        guard !live.isEmpty || !finished.isEmpty else { return messages }
+        return messages.map { message in
+            guard message.tools.contains(where: { $0.name == "background" }) else { return message }
+            var message = message
+            message.tools = message.tools.map { row(for: $0) }
+            return message
+        }
+    }
+
+    private func row(for tool: ToolDisplay) -> ToolDisplay {
+        guard tool.name == "background" else { return tool }
+        // A delivered result wins over live state, which can outlast it briefly.
+        guard let (result, messageID) = finished[tool.id] else { return live[tool.id] ?? tool }
+        // The output appears once, at the result; this row only links to it.
+        var row = result
+        row.id = tool.id
+        row.result = ""
+        row.details = nil
+        row.images = []
+        row.backgroundJob?.resultMessageID = messageID
+        return row
+    }
+
+    private static func jobID(of tool: ToolDisplay) -> Int? {
+        guard let data = tool.details?.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return object["id"] as? Int
     }
 }
 
@@ -270,7 +363,9 @@ struct TurnTiming: Hashable {
     let duration: TimeInterval
     let isLatest: Bool
 
-    var durationText: String {
+    var durationText: String { Self.format(duration) }
+
+    static func format(_ duration: TimeInterval) -> String {
         let seconds = max(1, Int(duration.rounded()))
         if seconds < 60 { return "\(seconds)s" }
         if seconds < 3600 { return "\(seconds / 60)m \(seconds % 60)s" }
@@ -299,7 +394,11 @@ private struct TranscriptToolPresentation {
         var tools: [ToolDisplay] = []
     }
 
-    init(messages: [ChatMessage], visibleMessages: [ChatMessage], isAgentActive: Bool, showThinkingTraces: Bool) {
+    init(messages: [ChatMessage], visibleMessages: [ChatMessage], isAgentActive: Bool, showThinkingTraces: Bool,
+         backgroundJobTools: [String: ToolDisplay] = [:]) {
+        let jobs = BackgroundJobRows(messages: messages, live: backgroundJobTools)
+        let messages = jobs.apply(messages)
+        let visibleMessages = jobs.apply(visibleMessages)
         let visibleMessageIDs = Set(visibleMessages.map(\.id))
         var groups: [String: AccumulatedGroup] = [:]
         var order: [String] = []
@@ -307,7 +406,10 @@ private struct TranscriptToolPresentation {
         var currentSegment = "tools-before-first-user"
 
         for message in messages {
-            if message.role == .user {
+            // A finished background job wakes the agent like a prompt, so it starts
+            // a new turn. Otherwise the reply it triggers would fold the previous
+            // turn's answer into that turn's tool activity.
+            if message.role == .user || message.isBackgroundJobResult {
                 currentSegment = "tools-after-\(message.id)"
             }
             segmentByMessageID[message.id] = currentSegment
@@ -317,7 +419,7 @@ private struct TranscriptToolPresentation {
             }
             groups[currentSegment]?.messages.append(message)
 
-            let automaticTools = message.tools.filter { $0.userLabel == nil }
+            let automaticTools = message.isBackgroundJobResult ? [] : message.tools.filter { $0.userLabel == nil }
             guard message.role != .user, !automaticTools.isEmpty else { continue }
             for tool in automaticTools {
                 if let index = groups[currentSegment]?.tools.firstIndex(where: { $0.id == tool.id }) {
@@ -362,7 +464,7 @@ private struct TranscriptToolPresentation {
             var activityMessageIDs: [String] = []
 
             for message in group.messages where message.role != .user {
-                let automaticTools = message.tools.filter { $0.userLabel == nil }
+                let automaticTools = message.isBackgroundJobResult ? [] : message.tools.filter { $0.userLabel == nil }
                 let containsWidget = message.role == .assistant && !widgets(for: message).isEmpty
                 let isVisibleOutput = message.role == .assistant && (message.id == visibleOutputID || containsWidget)
                 let isIntermediateAssistant = message.role == .assistant && !isVisibleOutput
@@ -397,7 +499,7 @@ private struct TranscriptToolPresentation {
             }
 
             guard let hostID = visibleMessages.first(where: {
-                segmentByMessageID[$0.id] == key && $0.role != .user
+                segmentByMessageID[$0.id] == key && $0.role != .user && !$0.isBackgroundJobResult
             })?.id else { continue }
             groupedMessageIDs.formUnion(activityMessageIDs)
             groupByHostMessageID[hostID] = ToolPresentationGroup(
@@ -424,6 +526,10 @@ private struct TranscriptToolPresentation {
                         }
                     }
                 }
+            }
+            if message.isBackgroundJobResult {
+                items.append(.backgroundJobResult(message))
+                continue
             }
             let userTools = message.tools.filter { $0.userLabel != nil }
             if !userTools.isEmpty {

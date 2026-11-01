@@ -22,7 +22,14 @@ struct ComposerToolbar: View {
             Spacer(minLength: 8)
             VStack(alignment: .leading, spacing: 4) {
                 if let usageProvider {
-                    UsageLimitIndicator(snapshot: model.usageLimit(for: usageProvider)) { model.refreshUsageLimit(for: usageProvider) }
+                    if usageProvider == .claudeBridge {
+                        UsageLimitIndicator(
+                            snapshot: controller.claudeBridgeUsage ?? UsageLimitSnapshot(serviceName: "Claude Code"),
+                            pendingText: "Waiting for Claude Code quota data…"
+                        ) { }
+                    } else {
+                        UsageLimitIndicator(snapshot: model.usageLimit(for: usageProvider)) { model.refreshUsageLimit(for: usageProvider) }
+                    }
                 }
                 ContextUsageBar(percent: controller.contextPercent, tokens: controller.contextTokens, window: controller.contextWindow)
             }
@@ -37,7 +44,7 @@ struct ComposerToolbar: View {
             let provider = UsageLimitProvider.from(model: selectedModel)
             guard !Task.isCancelled else { return }
             usageProvider = provider
-            model.refreshUsageLimit(for: provider)
+            if provider != .claudeBridge { model.refreshUsageLimit(for: provider) }
         }
     }
 

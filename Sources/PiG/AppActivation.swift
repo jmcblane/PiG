@@ -13,7 +13,7 @@ final class PiGAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
 
     @MainActor
     func confirmStoppingWork() -> Bool {
-        guard let working = model?.controllers.values.filter(\.showsActivityIndicator), !working.isEmpty else {
+        guard let working = model?.controllers.values.filter(\.hasLiveWork), !working.isEmpty else {
             return true
         }
 
@@ -26,7 +26,7 @@ final class PiGAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
         } else {
             alert.messageText = "Quit PiG while \(working.count) sessions are working?"
         }
-        alert.informativeText = "Running agent work will be stopped."
+        alert.informativeText = "Running agent work and background jobs will be stopped."
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")
         alert.buttons[1].keyEquivalent = "\u{1b}"

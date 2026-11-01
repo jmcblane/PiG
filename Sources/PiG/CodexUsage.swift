@@ -17,12 +17,13 @@ struct UsageLimitSnapshot: Hashable {
 enum UsageLimitProvider: Hashable {
     case codex(String)
     case claude
+    case claudeBridge
     case grok
 
     var serviceName: String {
         switch self {
         case .codex: return "Codex"
-        case .claude: return "Claude Code"
+        case .claude, .claudeBridge: return "Claude Code"
         case .grok: return "Grok"
         }
     }
@@ -30,6 +31,7 @@ enum UsageLimitProvider: Hashable {
     static func from(model: ModelInfo?) -> UsageLimitProvider? {
         guard let model else { return nil }
         let provider = model.provider.lowercased()
+        if provider == "claude-bridge" { return .claudeBridge }
         let kind: UsageLimitProvider
         if provider.contains("openai") || provider.contains("codex") { kind = .codex(model.provider) }
         else if provider.contains("anthropic") || provider.contains("claude") { kind = .claude }
@@ -54,6 +56,7 @@ enum UsageLimitService {
             switch provider {
             case .codex(let key): return try await CodexUsageService.fetch(provider: key)
             case .claude: return try await ClaudeUsageService.fetch()
+            case .claudeBridge: return UsageLimitSnapshot(serviceName: provider.serviceName)
             case .grok: return try await GrokUsageService.fetch()
             }
         } catch {
@@ -114,6 +117,37 @@ enum CodexUsageService {
     private static func secondsUntil(_ unixSeconds: Double?) -> Double {
         guard let unixSeconds else { return 0 }
         return max(0, unixSeconds - Date().timeIntervalSince1970)
+    }
+}
+
+// Claude Code's bridge emits utilization fractions (0...1) and Unix reset times.
+// Parse only known windows, ignoring missing or malformed values.
+enum ClaudeBridgeUsageService {
+    static func snapshot(from text: String) -> UsageLimitSnapshot? {
+        guard let data = text.data(using: .utf8),
+              let headers = try? JSONDecoder().decode([String: String].self, from: data) else { return nil }
+        func window(_ key: String, label: String) -> UsageLimitWindow? {
+            guard let raw = headers["\(key)-utilization"],
+                  let used = Double(raw), used.isFinite else { return nil }
+            let reset = headers["\(key)-reset"].flatMap(Double.init)
+            let resetText: String
+            if let reset, reset.isFinite {
+                resetText = "in \(UsageLimitHelpers.formatDuration(max(0, reset - Date().timeIntervalSince1970)))"
+            } else {
+                resetText = "unknown"
+            }
+            return UsageLimitWindow(
+                label: label,
+                remainingPercent: Int(((1 - min(1, max(0, used))) * 100).rounded()),
+                resetText: resetText
+            )
+        }
+        let primary = window("5h", label: "5h")
+        let weekly = window("7d", label: "Weekly")
+        let extra = window("7d_oi", label: "Weekly (extra)")
+        let details = [primary, weekly, extra].compactMap { $0 }
+        guard !details.isEmpty else { return nil }
+        return UsageLimitSnapshot(serviceName: "Claude Code", primary: primary, weekly: weekly, details: details)
     }
 }
 

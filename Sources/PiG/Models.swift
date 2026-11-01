@@ -713,6 +713,31 @@ enum ToolStatus: String, Codable, Sendable {
     case failed
 }
 
+struct CodemodeCall: Identifiable, Sendable {
+    var id: String
+    var name: String
+    var subject: String
+    var failed: Bool
+    var durationMs: Double?
+
+    /// One-line summary of a call's `args`: a JSON object (possibly truncated by pi) or plain text.
+    static func subject(_ args: String) -> String {
+        if let data = args.data(using: .utf8),
+           let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            let title = ToolDisplay.genericTitle(name: "", args: object)
+            return title.trimmingCharacters(in: .whitespaces)
+        }
+        // Truncated JSON: drop the leading `{"key":"` and show the rest of the first value.
+        if args.hasPrefix("{\""), let range = args.range(of: "\":\"") {
+            return String(args[range.upperBound...])
+                .replacingOccurrences(of: "\\n", with: " ")
+                .replacingOccurrences(of: "\\\"", with: "\"")
+                .oneLine(max: 160)
+        }
+        return args.oneLine(max: 160)
+    }
+}
+
 struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
     var id: String
     var name: String
@@ -724,6 +749,8 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
     var isError: Bool
     // Set for commands run directly by the user (!, !!, custom actions).
     var userLabel: String? = nil
+    // Set for tools run as jobs by the `background` extension tool.
+    var backgroundJob: BackgroundJobInfo? = nil
 
     var summary: String { displayTitle }
 
@@ -747,6 +774,11 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
                 ?? "Run shell command"
         case "delegate_agent", "subagent":
             return "Subagent — \(subagentSummary(args))"
+        case "background":
+            let job = string(args, "label")?.nonEmptyTrimmed ?? string(args, "tool") ?? "tool"
+            return "Background — \(job)"
+        case "codemode":
+            return codemodeTitle(args)
         default:
             return Self.genericTitle(name: tool, args: args)
         }
@@ -788,6 +820,52 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
             return number.stringValue
         }
         return nil
+    }
+
+    /// The script's leading `//` comment (skipping `@options`), call count, and wall time.
+    private func codemodeTitle(_ args: [String: Any]) -> String {
+        let comment = (string(args, "code") ?? "").split(separator: "\n").lazy
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .prefix { $0.hasPrefix("//") }
+            .first { !$0.hasPrefix("// @options") }
+            .flatMap { String($0.dropFirst(2)).nonEmptyTrimmed }
+        var parts = [comment?.oneLine(max: 100) ?? "Script"]
+        let count = codemodeCalls.count
+        if count > 0 { parts.append(count == 1 ? "1 call" : "\(count) calls") }
+        if let wall = codemodeWallTime { parts.append(wall) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Calls a codemode script made, from `details.calls`.
+    var codemodeCalls: [CodemodeCall] {
+        guard shortName == "codemode", let details, let calls = jsonObject(details)?["calls"] as? [[String: Any]] else { return [] }
+        return calls.enumerated().map { index, call in
+            let name = (call["name"] as? String) ?? "call"
+            return CodemodeCall(
+                id: (call["id"] as? String) ?? "\(index)",
+                name: name.hasPrefix("models.") ? String(name.dropFirst(7)) : name,
+                subject: CodemodeCall.subject(call["args"] as? String ?? ""),
+                failed: (call["status"] as? String).map { $0 != "ok" && $0 != "running" } ?? false,
+                durationMs: (call["durationMs"] as? NSNumber)?.doubleValue
+            )
+        }
+    }
+
+    /// `Wall time 0.4 seconds` from the result header, as `0.4s`.
+    private var codemodeWallTime: String? {
+        guard result.hasPrefix("Script ") else { return nil }
+        let line = result.split(separator: "\n", maxSplits: 3).first { $0.hasPrefix("Wall time ") }
+        guard let seconds = line?.dropFirst(10).split(separator: " ").first else { return nil }
+        return "\(seconds)s"
+    }
+
+    /// Script output without the `Script completed` / `Wall time` / `Output:` header.
+    var codemodeOutput: String {
+        var lines = result.split(separator: "\n", omittingEmptySubsequences: false)[...]
+        if lines.first?.hasPrefix("Script ") == true { lines = lines.dropFirst() }
+        if lines.first?.hasPrefix("Wall time ") == true { lines = lines.dropFirst() }
+        if lines.first == "Output:" { lines = lines.dropFirst() }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var bashCommand: String? {
@@ -1225,6 +1303,24 @@ struct ChatMessage: Identifiable, Codable, Hashable, Sendable {
         self.timestamp = timestamp
         self.stopReason = stopReason
         self.isStreaming = isStreaming
+    }
+}
+
+struct BackgroundJobInfo: Codable, Hashable, Sendable {
+    var id: Int
+    /// When PiG first saw the job running; drives the live timer.
+    var startedAt: Date? = nil
+    /// Run time of a finished job.
+    var duration: TimeInterval? = nil
+    /// On the launching `background` row of a finished job: the message holding its result.
+    var resultMessageID: String? = nil
+}
+
+extension ChatMessage {
+    /// A finished-job message from the `background` extension. It wakes the agent,
+    /// so the transcript shows it where a prompt would start the turn.
+    var isBackgroundJobResult: Bool {
+        role == .custom && tools.contains { $0.backgroundJob != nil }
     }
 }
 

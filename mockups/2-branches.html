@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PiG — Branches</title>
+<style>
+  :root {
+    --desk: #e9ecf1;
+    --paper: #ffffff;
+    --side: #f4f6f9;
+    --ink: #1b2230;
+    --ink-2: #4b5466;
+    --ink-3: #8a93a5;
+    --line: #e2e6ed;
+    --main: #3056d3;
+    --alt: #0f9b8e;
+    --alt2: #c2611f;
+    --serif: "Iowan Old Style", "Charter", Georgia, serif;
+    --ui: -apple-system, "SF Pro Text", system-ui, sans-serif;
+    --mono: "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--desk); color: var(--ink); font: 13px/1.45 var(--ui); }
+  body { display: grid; place-items: center; padding: 24px; }
+
+  .win {
+    width: min(1380px, 100%); height: min(900px, calc(100vh - 48px));
+    display: grid; grid-template-columns: 230px 1fr; grid-template-rows: 44px 1fr;
+    background: var(--paper); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(20,30,50,.12), 0 24px 60px -24px rgba(20,30,50,.35);
+  }
+  .titlebar {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 0 14px;
+    border-bottom: 1px solid var(--line); background: var(--side);
+  }
+  .lights { display: flex; gap: 8px; width: 216px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+  .crumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+  .crumb b { color: var(--ink); font-weight: 600; }
+  .crumb .sep { color: var(--ink-3); }
+  .branch-tag { display: flex; align-items: center; gap: 6px; color: var(--main); font-weight: 500; }
+  .branch-tag svg { width: 13px; height: 13px; }
+  .spacer { flex: 1; }
+  .icon-btn { width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-2); border: 0; background: none; cursor: pointer; }
+  .icon-btn:hover { background: var(--line); color: var(--ink); }
+  .icon-btn svg { width: 16px; height: 16px; }
+
+  /* library */
+  .library { background: var(--side); border-right: 1px solid var(--line); overflow-y: auto; padding: 14px 10px; display: flex; flex-direction: column; gap: 18px; }
+  .search { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 7px; background: var(--paper); border: 1px solid var(--line); color: var(--ink-3); }
+  .search svg { width: 13px; height: 13px; }
+  .group h3 { margin: 0 0 4px 8px; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+  .s { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+  .s:hover { background: var(--line); }
+  .s.on { background: var(--paper); box-shadow: 0 0 0 1px var(--line); }
+  .s span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .s .forks { color: var(--ink-3); font-size: 11px; display: flex; gap: 3px; align-items: center; }
+  .s .forks svg { width: 11px; height: 11px; }
+
+  /* document */
+  .doc { overflow-y: auto; position: relative; display: flex; flex-direction: column; }
+  .page { width: 100%; max-width: 1040px; margin: 0 auto; padding: 36px 32px 0; flex: 1; }
+  .turn { display: grid; grid-template-columns: 44px minmax(0, 66ch) 1fr; column-gap: 24px; position: relative; }
+  .turn.dim { opacity: .28; }
+
+  .spine { position: relative; }
+  .spine::before { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; width: 2px; background: var(--c, var(--main)); opacity: .25; }
+  .turn:first-child .spine::before { top: 14px; }
+  .node {
+    position: absolute; left: 6px; top: 6px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--paper); border: 2.5px solid var(--c, var(--main)); z-index: 1;
+  }
+  .forked .node { box-shadow: 0 0 0 4px var(--paper), 0 0 0 5px var(--line); }
+
+  .prompt { font: 600 16.5px/1.4 var(--ui); margin: 2px 0 14px; position: relative; letter-spacing: -.005em; }
+  .prompt .fork-btn {
+    position: absolute; left: -34px; top: 26px; opacity: 0; transition: opacity .12s;
+    width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line); background: var(--paper); color: var(--ink-2);
+    display: grid; place-items: center; cursor: pointer;
+  }
+  .prompt .fork-btn svg { width: 12px; height: 12px; }
+  .turn:hover .fork-btn { opacity: 1; }
+  .alts { display: grid; gap: 4px; margin: -6px 0 16px; }
+  .alt { display: flex; align-items: baseline; gap: 8px; color: var(--ink-3); font-size: 13px; cursor: pointer; width: fit-content; }
+  .alt svg { width: 12px; height: 12px; flex: none; transform: translateY(1px); }
+  .alt:hover { color: var(--ink); }
+  .alt:hover span { text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+
+  .reply { font: 16px/1.62 var(--serif); color: var(--ink); padding-bottom: 34px; }
+  .reply p { margin: 0 0 12px; }
+  .reply code { font: 13px var(--mono); background: #f0f2f6; padding: 1px 5px; border-radius: 4px; }
+  .reply pre { font: 12.5px/1.55 var(--mono); background: #f5f7fa; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 4px 0 14px; }
+  .reply pre .k { color: #a626a4; } .reply pre .t { color: var(--main); } .reply pre .s { color: var(--alt); }
+  .reply .think { font: italic 14px/1.55 var(--serif); color: var(--ink-3); border-left: 2px solid var(--line); padding-left: 12px; margin-bottom: 14px; }
+
+  /* margin notes */
+  .notes { padding-top: 34px; display: grid; gap: 10px; align-content: start; font-size: 12px; color: var(--ink-2); max-width: 260px; }
+  .note { display: grid; grid-template-columns: 14px 1fr; gap: 8px; align-items: start; }
+  .note svg { width: 13px; height: 13px; color: var(--ink-3); margin-top: 2px; }
+  .note .f { font-family: var(--mono); font-size: 11.5px; color: var(--ink); word-break: break-all; }
+  .note .add { color: #1a8a4a; } .note .del { color: #c43c3c; }
+  .note.model { color: var(--ink-3); }
+  .note.ok svg { color: #1a8a4a; }
+
+  /* composer continues the spine */
+  .continue { position: sticky; bottom: 0; background: linear-gradient(to bottom, rgba(255,255,255,0), var(--paper) 22px); padding-top: 22px; }
+  .continue .turn { padding-bottom: 22px; }
+  .continue .spine::before { bottom: auto; height: 28px; top: -22px; }
+  .continue .node { border-style: dashed; }
+  .box { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; background: var(--paper); box-shadow: 0 4px 16px -8px rgba(20,30,50,.18); }
+  .box:focus-within { border-color: #b9c3d6; }
+  .fork-banner { display: none; align-items: center; gap: 8px; font-size: 12px; color: var(--alt2); }
+  .fork-banner svg { width: 12px; height: 12px; }
+  .fork-banner button { margin-left: auto; border: 0; background: none; color: var(--ink-3); cursor: pointer; font: inherit; }
+  .forking .fork-banner { display: flex; }
+  .forking .node { border-color: var(--alt2) !important; }
+  textarea { border: 0; outline: 0; resize: none; font: 15px/1.5 var(--ui); color: var(--ink); height: 24px; background: none; padding: 0; }
+  textarea::placeholder { color: var(--ink-3); }
+  .box-foot { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--ink-3); }
+  .box-foot button { border: 0; background: none; padding: 0; font: inherit; color: var(--ink-2); cursor: pointer; display: flex; align-items: center; gap: 5px; }
+  .box-foot button:hover { color: var(--ink); }
+  .box-foot svg { width: 13px; height: 13px; }
+  .ctx { display: flex; align-items: center; gap: 6px; }
+  .ctx .bar { width: 64px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .ctx .bar i { display: block; height: 100%; width: 41%; background: var(--main); }
+  .send { width: 28px; height: 28px; border-radius: 7px; border: 0; background: var(--ink); color: #fff; display: grid; place-items: center; cursor: pointer; }
+  .send svg { width: 14px; height: 14px; }
+</style>
+</head>
+<body>
+<div class="win">
+  <header class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="crumb">
+      <span>pig</span><span class="sep">/</span><b>Redesign the session tree</b><span class="sep">/</span>
+      <span class="branch-tag" id="branch-tag"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 5v6M12 7.5c0 2.5-3 3-8 3.5"/></svg><span id="branch-name">graph</span></span>
+    </div>
+    <div class="spacer"></div>
+    <button class="icon-btn" title="Terminal (⌘D)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="m5 7 2 1.5L5 10M8.5 10.5H11"/></svg></button>
+    <button class="icon-btn" title="Files"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 4.5v8h11v-6.5H8L6.5 4.5z"/></svg></button>
+    <button class="icon-btn" title="New session"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg></button>
+  </header>
+
+  <aside class="library">
+    <div class="search"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>Search</div>
+    <div class="group">
+      <h3>pig</h3>
+      <div class="s on"><span>Redesign the session tree</span><span class="forks"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 5v6M12 7.5c0 2.5-3 3-8 3.5"/></svg>3</span></div>
+      <div class="s"><span>Native terminal options</span><span class="forks"></span></div>
+      <div class="s"><span>Squashed new-thread rows</span><span class="forks"></span></div>
+    </div>
+    <div class="group">
+      <h3>PiAgents</h3>
+      <div class="s"><span>Hermes auth storage</span><span class="forks"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 5v6M12 7.5c0 2.5-3 3-8 3.5"/></svg>2</span></div>
+      <div class="s"><span>Sidebar agent reordering</span><span class="forks"></span></div>
+    </div>
+    <div class="group">
+      <h3>Quick chats</h3>
+      <div class="s"><span>Casual greeting</span><span class="forks"></span></div>
+    </div>
+  </aside>
+
+  <main class="doc" id="doc">
+    <div class="page" id="page"></div>
+    <div class="continue" id="continue">
+      <div class="page" style="padding-top:0">
+        <div class="turn">
+          <div class="spine"><span class="node"></span></div>
+          <div class="box">
+            <div class="fork-banner"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 5v6M12 7.5c0 2.5-3 3-8 3.5"/></svg><span id="fork-label"></span><button id="cancel-fork">Cancel</button></div>
+            <textarea id="input" placeholder="Continue this branch"></textarea>
+            <div class="box-foot">
+              <button title="Model (⌘1–⌘5)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="10" height="10" rx="2"/><path d="M6 6h4v4H6z"/></svg>Opus 5.5</button>
+              <button title="Thinking level"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12h2V9H3zM7 12h2V6H7zM11 12h2V3h-2z"/></svg>Medium</button>
+              <button title="Extensions & skills"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 2.5h4v3h3v4h-3v4H6v-4H3v-4h3z"/></svg></button>
+              <button title="Attach image"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="6" cy="6.5" r="1.2"/><path d="m2.5 12 4-4 3 3 2-2 2 2"/></svg></button>
+              <span class="spacer"></span>
+              <span class="ctx" title="Context used on this branch"><span class="bar"><i id="ctx-bar"></i></span><span id="ctx-num">82k</span></span>
+              <button class="send" title="Send"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></button>
+            </div>
+          </div>
+          <div></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  const I = {
+    fork: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 5v6M12 7.5c0 2.5-3 3-8 3.5"/></svg>',
+    read: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 2h5.5L12 4.5V14H4z"/><path d="M9.5 2v2.5H12"/></svg>',
+    edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10.5 2.5 13.5 5.5 6 13H3v-3z"/></svg>',
+    run: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4 5 3 3-3 3M8.5 11.5H12"/></svg>',
+    ok: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m3.5 8.5 3 3 6-7"/></svg>',
+    model: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="10" height="10" rx="2"/><path d="M6 6h4v4H6z"/></svg>',
+  };
+
+  // A session is a tree of turns. Each turn may have sibling branches.
+  const tree = {
+    id: "t1", c: "--main",
+    prompt: "The session tree view is a modal list. Can we make branching feel like part of the chat instead?",
+    reply: `<p>Yes. Right now forking is a separate mode: you open the tree, pick a prompt, then land in a new session. The chat never shows that other branches exist.</p>
+            <p>Two options: keep a flat transcript and mark forks inline, or draw the conversation as a graph so every branch point is visible while you read.</p>`,
+    notes: [["model", "Opus 5.5, medium"], ["read", "<span class='f'>SessionTreeView.swift</span>"], ["read", "<span class='f'>SessionParser.swift</span>"]],
+    kids: [
+      {
+        id: "t2a", branch: "flat list", c: "--alt",
+        prompt: "Keep it a flat list. Just mark the forks.",
+        reply: `<p>I added a small fork glyph next to any prompt with siblings. Clicking it opens a menu of the other paths.</p>
+                <p>It’s cheap, but you still can’t see where you are in the tree.</p>`,
+        notes: [["edit", "<span class='f'>ChatTranscriptView.swift</span> <span class='add'>+42</span> <span class='del'>−3</span>"], ["ok", "swift build"]],
+        ctx: 58, kids: [],
+      },
+      {
+        id: "t2b", branch: "graph", c: "--main",
+        prompt: "Draw it as a graph down the left edge, like git log --graph.",
+        reply: `<div class="think">The spine needs to stay aligned with variable-height turns, so it should belong to each turn row rather than be one big canvas.</div>
+                <p>Each turn now owns a spine segment and a node. A turn with siblings gets a ring, and its alternates are listed under the prompt so you can jump between them without leaving the page.</p>
+                <pre><span class="k">struct</span> <span class="t">TurnRow</span>: <span class="t">View</span> {
+    <span class="k">let</span> turn: <span class="t">Turn</span>
+    <span class="k">var</span> siblings: [<span class="t">Turn</span>]
+    <span class="k">var</span> onFork: (<span class="t">Turn</span>) -> <span class="t">Void</span>
+}</pre>
+                <p>Hover any prompt to fork from it. The composer moves to that point, and everything after it fades until you send.</p>`,
+        notes: [["edit", "<span class='f'>ChatTranscriptView.swift</span> <span class='add'>+118</span> <span class='del'>−20</span>"], ["edit", "<span class='f'>SessionTreeView.swift</span> <span class='del'>−240</span>"], ["run", "swift build"], ["ok", "swift test, 14 passed"]],
+        ctx: 82,
+        kids: [
+          {
+            id: "t3", c: "--main",
+            prompt: "Nice. What happens to the old tree modal?",
+            reply: `<p>It’s gone. Search (⌘F) already finds prompts across sessions, and the spine covers navigation inside one session. That removes about 240 lines.</p>`,
+            notes: [["model", "Opus 5.5, medium"]],
+            ctx: 84, kids: [],
+          },
+        ],
+      },
+      {
+        id: "t2c", branch: "timeline", c: "--alt2",
+        prompt: "What about a horizontal timeline above the chat?",
+        reply: `<p>I sketched it. It works for short sessions but turns into a scrollbar of dots past twenty turns. I’d drop it.</p>`,
+        notes: [["model", "Sonnet 5.5, low"]],
+        ctx: 51, kids: [],
+      },
+    ],
+  };
+
+  let path = ["t1", "t2b", "t3"];
+  let forkAt = null;
+
+  function find(node, id, parent = null) {
+    if (node.id === id) return { node, parent };
+    for (const k of node.kids) { const r = find(k, id, node); if (r) return r; }
+    return null;
+  }
+  function deepest(node) { return node.kids.length ? [node.id, ...deepest(node.kids[node.kids.length > 1 ? 1 : 0])] : [node.id]; }
+
+  function render() {
+    const page = document.getElementById("page");
+    page.innerHTML = "";
+    path.forEach((id, i) => {
+      const { node, parent } = find(tree, id);
+      const siblings = parent ? parent.kids.filter(k => k.id !== id) : [];
+      const el = document.createElement("div");
+      el.className = "turn" + (siblings.length ? " forked" : "") + (forkAt !== null && i >= forkAt ? " dim" : "");
+      el.style.setProperty("--c", `var(${node.c})`);
+      el.innerHTML = `
+        <div class="spine"><span class="node"></span></div>
+        <div>
+          <div class="prompt">${node.prompt}<button class="fork-btn" title="Fork from here" data-fork="${i}">${I.fork}</button></div>
+          ${siblings.length ? `<div class="alts">${siblings.map(s =>
+            `<div class="alt" data-go="${s.id}" style="color:var(${s.c})">${I.fork}<span style="color:var(--ink-3)">${s.prompt}</span></div>`).join("")}</div>` : ""}
+          <div class="reply">${node.reply}</div>
+        </div>
+        <div class="notes">${node.notes.map(([k, v]) =>
+          `<div class="note ${k}">${I[k]}<span>${v}</span></div>`).join("")}</div>`;
+      page.appendChild(el);
+    });
+
+    const leaf = find(tree, path[path.length - 1]).node;
+    const branchNode = path.map(id => find(tree, id).node).reverse().find(n => n.branch);
+    document.getElementById("branch-name").textContent = branchNode ? branchNode.branch : "main";
+    document.getElementById("branch-tag").style.color = `var(${(branchNode || tree).c})`;
+    const ctx = leaf.ctx || 30;
+    document.getElementById("ctx-bar").style.width = ctx / 2 + "%";
+    document.getElementById("ctx-num").textContent = ctx + "k";
+
+    const cont = document.getElementById("continue");
+    cont.classList.toggle("forking", forkAt !== null);
+    cont.querySelector(".node").style.borderColor = `var(${leaf.c})`;
+    document.getElementById("input").placeholder = forkAt !== null ? "Ask something different" : "Continue this branch";
+    document.getElementById("fork-label").textContent = forkAt !== null ? `Branching at turn ${forkAt + 1}` : "";
+  }
+
+  document.getElementById("page").addEventListener("click", e => {
+    const go = e.target.closest("[data-go]");
+    if (go) {
+      const { parent } = find(tree, go.dataset.go);
+      const at = path.indexOf(parent.id);
+      path = [...path.slice(0, at + 1), ...deepest(find(tree, go.dataset.go).node)];
+      forkAt = null;
+      render();
+      return;
+    }
+    const fork = e.target.closest("[data-fork]");
+    if (fork) {
+      forkAt = +fork.dataset.fork;
+      render();
+      document.getElementById("input").focus();
+    }
+  });
+  document.getElementById("cancel-fork").addEventListener("click", () => { forkAt = null; render(); });
+
+  render();
+</script>
+</body>
+</html>

@@ -120,7 +120,9 @@ if [[ "$CLEAN" == "1" ]]; then
 fi
 
 echo "Building $APP_NAME ($CONFIG)…"
-swift build -c "$CONFIG"
+# Native keeps the binary at .build/$CONFIG and skips compiling SwiftTerm's
+# Metal shaders, which needs Xcode's separately installed Metal Toolchain.
+swift build -c "$CONFIG" --build-system native
 
 echo "Creating app bundle: $APP"
 rm -rf "$APP"

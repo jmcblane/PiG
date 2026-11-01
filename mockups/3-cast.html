@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PiG — Cast</title>
+<style>
+  :root {
+    --bg: #262036;
+    --bg-2: #2f2843;
+    --raise: #382f50;
+    --line: rgba(255,255,255,.09);
+    --ink: #f1ecf8;
+    --ink-2: #b8aecb;
+    --ink-3: #807596;
+    --peach: #ffb38a;
+    --mint: #8fe3c4;
+    --sky: #9ab8ff;
+    --rose: #ff8fae;
+    --ui: "Avenir Next", -apple-system, system-ui, sans-serif;
+    --mono: "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #161221; color: var(--ink); font: 14px/1.5 var(--ui); }
+  body { display: grid; place-items: center; padding: 24px; }
+
+  .win {
+    width: min(1200px, 100%); height: min(880px, calc(100vh - 48px));
+    position: relative; border-radius: 14px; overflow: hidden;
+    background:
+      radial-gradient(900px 500px at 50% -10%, rgba(255,179,138,.13), transparent 60%),
+      radial-gradient(700px 500px at 100% 100%, rgba(143,227,196,.07), transparent 60%),
+      var(--bg);
+    box-shadow: 0 0 0 1px rgba(255,255,255,.06), 0 40px 90px -30px rgba(0,0,0,.8);
+    display: grid; grid-template-rows: auto 1fr auto;
+  }
+  .win::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .08 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* top: the cast */
+  .top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; padding: 14px 16px 0; position: relative; z-index: 2; }
+  .lights { display: flex; gap: 8px; padding-top: 4px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+  .room { margin-left: 18px; color: var(--ink-2); font-size: 13px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .room svg { width: 14px; height: 14px; }
+  .room:hover { color: var(--ink); }
+  .cast { display: flex; gap: 14px; align-items: flex-end; }
+  .member { display: grid; justify-items: center; gap: 4px; cursor: pointer; position: relative; background: none; border: 0; padding: 0; color: inherit; font: inherit; }
+  .member .face { width: 38px; height: 38px; border-radius: 11px; overflow: hidden; opacity: .55; transition: transform .2s, opacity .2s; }
+  .member:hover .face { opacity: .85; }
+  .member.on .face { opacity: 1; transform: translateY(-2px) scale(1.12); box-shadow: 0 6px 18px -6px var(--tint); }
+  .member .name { font-size: 11.5px; color: var(--ink-3); height: 16px; }
+  .member.on .name { color: var(--ink); font-weight: 600; }
+  .member .bubble {
+    position: absolute; top: -6px; right: -10px; background: var(--raise); border-radius: 8px 8px 8px 2px;
+    padding: 1px 6px; display: none; gap: 2px; box-shadow: 0 0 0 1px var(--line);
+  }
+  .member .bubble i { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-2); animation: blink 1.2s infinite; }
+  .member .bubble i:nth-child(2) { animation-delay: .2s; } .member .bubble i:nth-child(3) { animation-delay: .4s; }
+  .member[data-state=working] .bubble { display: flex; }
+  .member .flag { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--peach); box-shadow: 0 0 0 2px var(--bg); display: none; }
+  .member[data-state=unread] .flag { display: block; background: var(--mint); }
+  .member[data-state=asking] .flag { display: block; }
+  @keyframes blink { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+  .member.add .face { display: grid; place-items: center; border: 1.5px dashed var(--ink-3); color: var(--ink-3); opacity: .7; }
+  .member.add .face svg { width: 16px; height: 16px; }
+  .top-right { display: flex; justify-content: flex-end; gap: 4px; }
+  .icon-btn { width: 30px; height: 30px; border-radius: 8px; border: 0; background: none; color: var(--ink-2); display: grid; place-items: center; cursor: pointer; }
+  .icon-btn:hover { background: var(--line); color: var(--ink); }
+  .icon-btn svg { width: 16px; height: 16px; }
+
+  /* conversation */
+  .stage { overflow-y: auto; position: relative; z-index: 1; }
+  .column { max-width: 680px; margin: 0 auto; padding: 40px 24px 24px; display: grid; gap: 22px; }
+  .you { justify-self: end; max-width: 80%; background: var(--raise); border-radius: 16px 16px 4px 16px; padding: 10px 14px; }
+  .them { display: grid; grid-template-columns: 26px 1fr; gap: 12px; }
+  .them .face { width: 26px; height: 26px; border-radius: 8px; overflow: hidden; }
+  .them p { margin: 0 0 10px; }
+  .them code { font: 12.5px var(--mono); color: var(--peach); background: rgba(255,179,138,.1); padding: 1px 5px; border-radius: 4px; }
+  .work { display: flex; gap: 8px; align-items: center; color: var(--ink-3); font-size: 12.5px; cursor: pointer; margin-bottom: 10px; width: fit-content; }
+  .work svg { width: 12px; height: 12px; transition: transform .2s; }
+  .work.open svg { transform: rotate(90deg); }
+  .work-list { display: none; font: 12px/1.7 var(--mono); color: var(--ink-3); margin: -4px 0 12px 20px; }
+  .work.open + .work-list { display: block; }
+
+  /* inline HTML control, themed */
+  .widget { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 12px; margin: 4px 0 10px; }
+  .sched { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; height: 34px; }
+  .sched i { border-radius: 3px; cursor: pointer; transition: background .1s; }
+  .sched-legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-2); align-items: center; }
+  .sched-legend span { display: flex; gap: 6px; align-items: center; cursor: pointer; padding: 2px 0; border-bottom: 1.5px solid transparent; }
+  .sched-legend span.sel { color: var(--ink); border-color: currentColor; }
+  .sched-legend b { width: 10px; height: 10px; border-radius: 3px; }
+  .hours { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--ink-3); margin-top: -6px; }
+  .widget .btn { justify-self: start; }
+  .btn { font: 600 12.5px var(--ui); border: 0; border-radius: 8px; padding: 6px 12px; background: var(--peach); color: #3a1f10; cursor: pointer; }
+
+  /* composer */
+  .dock { padding: 0 24px 22px; position: relative; z-index: 2; }
+  .composer { max-width: 680px; margin: 0 auto; display: grid; gap: 8px; }
+  .field { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: end; background: var(--bg-2); border-radius: 18px; padding: 10px 10px 10px 12px; box-shadow: 0 0 0 1px var(--line), 0 18px 40px -18px rgba(0,0,0,.6); }
+  .field:focus-within { box-shadow: 0 0 0 1px rgba(255,179,138,.35), 0 18px 40px -18px rgba(0,0,0,.6); }
+  .field .face { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; margin-bottom: 2px; }
+  textarea { border: 0; outline: 0; resize: none; background: none; color: var(--ink); font: 15px/1.5 var(--ui); height: 24px; padding: 4px 0 2px; }
+  textarea::placeholder { color: var(--ink-3); }
+  .send { position: relative; width: 36px; height: 36px; border: 0; background: none; padding: 0; cursor: pointer; display: grid; place-items: center; }
+  .send svg.ring { position: absolute; inset: 0; transform: rotate(-90deg); }
+  .send .core { width: 26px; height: 26px; border-radius: 50%; background: var(--peach); color: #3a1f10; display: grid; place-items: center; }
+  .send .core svg { width: 13px; height: 13px; }
+  .under { display: flex; gap: 18px; padding: 0 14px; font-size: 12.5px; color: var(--ink-3); align-items: center; }
+  .under button { border: 0; background: none; font: inherit; color: var(--ink-2); cursor: pointer; padding: 0; display: flex; gap: 6px; align-items: center; }
+  .under button:hover { color: var(--ink); }
+  .dial { display: flex; gap: 3px; align-items: flex-end; height: 12px; }
+  .dial i { width: 3px; border-radius: 1px; background: var(--ink-3); }
+  .dial i:nth-child(1) { height: 4px; } .dial i:nth-child(2) { height: 7px; } .dial i:nth-child(3) { height: 10px; } .dial i:nth-child(4) { height: 12px; }
+  .dial i.lit { background: var(--peach); }
+  .under .spacer { flex: 1; }
+  kbd { font: 11px var(--mono); color: var(--ink-3); }
+
+  /* palette */
+  .scrim { position: absolute; inset: 0; background: rgba(15,11,24,.55); backdrop-filter: blur(6px); z-index: 10; display: none; }
+  .scrim.open { display: block; }
+  .palette { position: absolute; left: 50%; top: 90px; transform: translateX(-50%); width: 580px; background: var(--bg-2); border-radius: 16px; box-shadow: 0 0 0 1px var(--line), 0 30px 80px -20px rgba(0,0,0,.8); overflow: hidden; }
+  .palette input { width: 100%; border: 0; outline: 0; background: none; color: var(--ink); font: 18px var(--ui); padding: 18px 20px; border-bottom: 1px solid var(--line); }
+  .palette input::placeholder { color: var(--ink-3); }
+  .results { max-height: 380px; overflow-y: auto; padding: 6px; }
+  .r { display: grid; grid-template-columns: 26px 1fr auto; gap: 12px; align-items: center; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+  .r.sel { background: var(--raise); }
+  .r .ic { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: var(--ink-2); background: var(--line); overflow: hidden; }
+  .r .ic svg { width: 14px; height: 14px; }
+  .r .ic svg.px { width: 26px; height: 26px; }
+  .r .sub { color: var(--ink-3); font-size: 12px; }
+  .r .kind { color: var(--ink-3); font-size: 12px; }
+  .palette-foot { display: flex; gap: 22px; padding: 10px 20px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
+  .usage { display: flex; gap: 8px; align-items: center; }
+  .usage .bar { width: 50px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .usage .bar i { display: block; height: 100%; }
+
+  /* terminal drawer */
+  .drawer { position: absolute; left: 0; right: 0; bottom: 0; height: 46%; z-index: 5; background: #1b1628; border-top: 1px solid var(--line); transform: translateY(100%); transition: transform .28s cubic-bezier(.3,.7,.2,1); display: grid; grid-template-rows: auto 1fr; }
+  .drawer.open { transform: none; }
+  .tabs { display: flex; gap: 2px; padding: 8px 12px 0; }
+  .tabs span { padding: 5px 12px; border-radius: 8px 8px 0 0; font-size: 12px; color: var(--ink-3); }
+  .tabs span.on { background: #221c32; color: var(--ink); }
+  .term { background: #221c32; font: 12.5px/1.6 var(--mono); color: #d9d2e6; padding: 12px 16px; white-space: pre; overflow: auto; }
+  .term .p { color: var(--mint); } .term .d { color: var(--ink-3); }
+</style>
+</head>
+<body>
+<div class="win" id="win">
+  <div class="top">
+    <div style="display:flex;align-items:center">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div class="room" data-open-palette="project" title="Project"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 4.5v8h11v-6.5H8L6.5 4.5z"/></svg>pig</div>
+    </div>
+    <div class="cast" id="cast"></div>
+    <div class="top-right">
+      <button class="icon-btn" data-open-palette title="Everything (⌘K)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg></button>
+      <button class="icon-btn" id="term-btn" title="Terminal (⌃`)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="m5 7 2 1.5L5 10M8.5 10.5H11"/></svg></button>
+    </div>
+  </div>
+
+  <div class="stage"><div class="column" id="column"></div></div>
+
+  <div class="dock">
+    <div class="composer">
+      <div class="field">
+        <div class="face" id="composer-face"></div>
+        <textarea id="input" placeholder="Message Pi"></textarea>
+        <button class="send" title="Send">
+          <svg class="ring" viewBox="0 0 36 36"><circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="2.5"/><circle id="ring" cx="18" cy="18" r="16" fill="none" stroke="var(--mint)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="100.5" stroke-dashoffset="60"/></svg>
+          <span class="core"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span>
+        </button>
+      </div>
+      <div class="under">
+        <button data-open-palette="model" title="Model (⌘1–⌘5)" id="model-name">Opus 5.5</button>
+        <button id="dial" title="Thinking level"><span class="dial"><i class="lit"></i><i class="lit"></i><i></i><i></i></span><span id="dial-name">Medium</span></button>
+        <button title="Extensions & skills"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 2.5h4v3h3v4h-3v4H6v-4H3v-4h3z"/></svg>4</button>
+        <span class="spacer"></span>
+        <kbd>⌘K</kbd>
+      </div>
+    </div>
+  </div>
+
+  <div class="drawer" id="drawer">
+    <div class="tabs"><span class="on">zsh</span><span>swift test</span></div>
+<div class="term"><span class="p">~/AI/pig ❯</span> scripts/build-app.sh
+<span class="d">Building PiG.app (release)…
+Signed ad-hoc: com.jacob.pig</span>
+<span class="p">~/AI/pig ❯</span> open dist/PiG.app
+<span class="p">~/AI/pig ❯</span> ▍</div>
+  </div>
+
+  <div class="scrim" id="scrim">
+    <div class="palette">
+      <input id="q" placeholder="Jump to anything" autocomplete="off">
+      <div class="results" id="results"></div>
+      <div class="palette-foot">
+        <span class="usage">Claude<span class="bar"><i style="width:62%;background:var(--peach)"></i></span></span>
+        <span class="usage">Codex<span class="bar"><i style="width:28%;background:var(--mint)"></i></span></span>
+        <span class="usage">Grok<span class="bar"><i style="width:8%;background:var(--sky)"></i></span></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Pixel faces. h hair, s skin, e eye, m mouth, c shirt, g glasses
+  const maps = {
+    short: ["..........", "..hhhhhh..", ".hhhhhhhh.", ".hssssssh.", ".sesssess.", ".ssssssss.", "..ssmmss..", "...ssss...", "..cccccc..", ".cccccccc."],
+    long:  ["..hhhhhh..", ".hhhhhhhh.", "hhssssssh.", "hseshsesh.", "hssssssshh", "hhssmmsshh", "hh.ssss.hh", "h.cccccc.h", ".cccccccc.", "cccccccccc"],
+    specs: ["..........", "..hhhhhh..", ".hhhhhhhh.", ".hssssssh.", ".gggsgggs.", ".gegsgegs.", "..ssmmss..", "...ssss...", "..cccccc..", ".cccccccc."],
+    bot:   ["....cc....", "....cc....", ".hhhhhhhh.", ".hsssssshh", ".hseesseh.", ".hsssssshh", ".hssmmssh.", ".hhhhhhhh.", "...cccc...", ".cccccccc."],
+  };
+  function face(look, size = 10) {
+    const col = { h: look.hair, s: look.skin, e: "#211a2e", m: "#b85a6a", c: look.tint, g: "#211a2e" };
+    let r = "";
+    maps[look.map].forEach((row, y) => [...row].forEach((ch, x) => {
+      if (ch !== ".") r += `<rect x="${x}" y="${y}" width="1" height="1" fill="${col[ch]}"/>`;
+    }));
+    return `<svg class="px" viewBox="0 0 10 10" shape-rendering="crispEdges" style="width:100%;height:100%;display:block;background:${look.tint}33">${r}</svg>`;
+  }
+
+  const cast = [
+    { id: "pi", name: "Pi", map: "short", hair: "#4a2f24", skin: "#f1c7a3", tint: "#ffb38a", state: "working", model: "Opus 5.5" },
+    { id: "researcher", name: "Researcher", map: "specs", hair: "#20202a", skin: "#c78d63", tint: "#9ab8ff", state: "unread", model: "GPT-6.1" },
+    { id: "hermes", name: "Hermes", map: "bot", hair: "#d6cfe6", skin: "#f3eefb", tint: "#8fe3c4", state: "asking", model: "remote" },
+    { id: "quick", name: "Quick", map: "long", hair: "#c9743f", skin: "#f6d3b7", tint: "#ff8fae", state: "idle", model: "Haiku 5.5" },
+  ];
+
+  const convos = {
+    pi: () => `
+      <div class="you">Use the cheaper model at night and on weekends. Can I set that up here?</div>
+      <div class="them"><div class="face">${face(cast[0])}</div><div>
+        <div class="work" onclick="this.classList.toggle('open')"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M6 4l4 4-4 4z"/></svg>Read 2 files</div>
+        <div class="work-list">read Sources/PiG/ModelsSettingsView.swift<br>read Sources/PiG/App/AppPreferences.swift</div>
+        <p>Yes. Paint the hours below, then save. Weekdays use this schedule; weekends use the night model all day.</p>
+        <div class="widget">
+          <div class="sched-legend" id="legend">
+            <span class="sel" data-m="day" style="color:var(--peach)"><b style="background:var(--peach)"></b>Opus 5.5</span>
+            <span data-m="night" style="color:var(--mint)"><b style="background:var(--mint)"></b>Haiku 5.5</span>
+          </div>
+          <div class="sched" id="sched"></div>
+          <div class="hours"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>
+          <button class="btn" onclick="this.textContent='Saved schedule';this.disabled=true">Save schedule</button>
+        </div>
+      </div></div>`,
+    researcher: () => `
+      <div class="you">Compare SwiftTerm with Ghostty’s library for embedding.</div>
+      <div class="them"><div class="face">${face(cast[1])}</div><div>
+        <p>SwiftTerm wins for now. It’s pure Swift, embeds as an <code>NSView</code>, and already handles themes and resize. Ghostty’s embedding API is still marked unstable.</p>
+        <p>I’d revisit Ghostty once it ships a tagged library release.</p>
+      </div></div>`,
+    hermes: () => `
+      <div class="you">Clean up the old auth file once tokens are in the Keychain.</div>
+      <div class="them"><div class="face">${face(cast[2])}</div><div>
+        <p>Tokens are in the Keychain. Should I delete <code>~/.hermes/auth.json</code>?</p>
+        <div style="display:flex;gap:8px"><button class="btn" onclick="this.parentElement.outerHTML='<p style=&quot;color:var(--ink-3)&quot;>Deleted auth.json</p>'">Delete</button><button class="btn" style="background:var(--raise);color:var(--ink)" onclick="this.parentElement.outerHTML='<p style=&quot;color:var(--ink-3)&quot;>Kept auth.json</p>'">Keep</button></div>
+      </div></div>`,
+    quick: () => `<div style="text-align:center;color:var(--ink-3);padding-top:120px">Throwaway chat. Nothing here is saved to a project.</div>`,
+  };
+
+  let current = "pi";
+  function renderCast() {
+    document.getElementById("cast").innerHTML = cast.map(m => `
+      <button class="member ${m.id === current ? "on" : ""}" data-id="${m.id}" data-state="${m.state}" style="--tint:${m.tint}" title="${m.name}">
+        <span class="bubble"><i></i><i></i><i></i></span><span class="flag"></span>
+        <span class="face">${face(m)}</span><span class="name">${m.id === current ? m.name : ""}</span>
+      </button>`).join("") + `<button class="member add" title="New chat (⌘N)"><span class="face"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v10M3 8h10"/></svg></span><span class="name"></span></button>`;
+  }
+  function show(id) {
+    current = id;
+    const m = cast.find(c => c.id === id);
+    if (m.state === "unread") m.state = "idle";
+    renderCast();
+    document.getElementById("column").innerHTML = convos[id]();
+    document.getElementById("composer-face").innerHTML = face(m);
+    document.getElementById("input").placeholder = `Message ${m.name}`;
+    document.getElementById("model-name").textContent = m.model;
+    document.getElementById("ring").setAttribute("stroke-dashoffset", 100.5 * (1 - ({ pi: .4, researcher: .72, hermes: .2, quick: .02 })[id]));
+    if (id === "pi") buildSchedule();
+  }
+  document.getElementById("cast").addEventListener("click", e => {
+    const b = e.target.closest(".member[data-id]");
+    if (b) show(b.dataset.id);
+  });
+
+  // Inline control: paint hours with the selected model
+  function buildSchedule() {
+    const sched = document.getElementById("sched");
+    let mode = "day", painting = false;
+    const color = { day: "var(--peach)", night: "var(--mint)" };
+    for (let h = 0; h < 24; h++) {
+      const i = document.createElement("i");
+      i.style.background = color[h >= 8 && h < 19 ? "day" : "night"];
+      i.title = `${h}:00`;
+      i.onmousedown = () => { painting = true; i.style.background = color[mode]; };
+      i.onmouseenter = () => { if (painting) i.style.background = color[mode]; };
+      sched.appendChild(i);
+    }
+    window.onmouseup = () => painting = false;
+    document.getElementById("legend").onclick = e => {
+      const s = e.target.closest("[data-m]"); if (!s) return;
+      mode = s.dataset.m;
+      document.querySelectorAll("#legend span").forEach(x => x.classList.toggle("sel", x === s));
+    };
+  }
+
+  // Thinking dial cycles levels
+  const levels = ["Off", "Low", "Medium", "High", "Extra high"];
+  let level = 2;
+  document.getElementById("dial").onclick = () => {
+    level = (level + 1) % levels.length;
+    document.querySelectorAll(".dial i").forEach((d, i) => d.classList.toggle("lit", i < level));
+    document.getElementById("dial-name").textContent = levels[level];
+  };
+
+  // ⌘K palette
+  const I = {
+    chat: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 3.5h11v7H7l-3 2.5v-2.5H2.5z"/></svg>',
+    folder: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 4.5v8h11v-6.5H8L6.5 4.5z"/></svg>',
+    file: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 2h5.5L12 4.5V14H4z"/></svg>',
+    chip: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="10" height="10" rx="2"/><path d="M6 6h4v4H6z"/></svg>',
+    bolt: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z"/></svg>',
+    tree: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 5v6M12 7.5c0 2.5-3 3-8 3.5"/></svg>',
+  };
+  const items = [
+    ...cast.map(m => ({ t: m.name, sub: m.model, kind: "agent", ic: face(m), go: m.id })),
+    { t: "Squashed new-thread rows", sub: "pig, yesterday", kind: "session", ic: I.chat },
+    { t: "Hermes auth storage", sub: "PiAgents, 2 days ago", kind: "session", ic: I.chat },
+    { t: "pig", sub: "~/AI/pig", kind: "project", ic: I.folder },
+    { t: "PiAgents", sub: "~/AI/PiAgents", kind: "project", ic: I.folder },
+    { t: "Bible_App", sub: "~/AI/Bible_App", kind: "project", ic: I.folder },
+    { t: "RootView.swift", sub: "Sources/PiG", kind: "file", ic: I.file },
+    { t: "ChatPaneView.swift", sub: "Sources/PiG/Chat", kind: "file", ic: I.file },
+    { t: "Opus 5.5", sub: "⌘1", kind: "model", ic: I.chip },
+    { t: "GPT-6.1 Sol", sub: "⌘2", kind: "model", ic: I.chip },
+    { t: "Haiku 5.5", sub: "⌘3", kind: "model", ic: I.chip },
+    { t: "Run tests", sub: "swift test", kind: "action", ic: I.bolt },
+    { t: "Build app", sub: "scripts/build-app.sh", kind: "action", ic: I.bolt },
+    { t: "Fork this chat", sub: "from any prompt", kind: "action", ic: I.tree },
+  ];
+  let sel = 0, shown = [];
+  const scrim = document.getElementById("scrim"), q = document.getElementById("q");
+  function renderResults() {
+    const v = q.value.trim().toLowerCase();
+    const [kind, term] = v.includes(":") ? v.split(":").map(s => s.trim()) : [null, v];
+    shown = items.filter(i => (!kind || i.kind === kind) && (i.t + " " + i.sub).toLowerCase().includes(term));
+    sel = Math.min(sel, Math.max(0, shown.length - 1));
+    document.getElementById("results").innerHTML = shown.map((i, n) => `
+      <div class="r ${n === sel ? "sel" : ""}" data-n="${n}"><span class="ic">${i.ic}</span>
+      <span>${i.t}<div class="sub">${i.sub}</div></span><span class="kind">${i.kind}</span></div>`).join("")
+      || `<div style="padding:18px;color:var(--ink-3)">Nothing matches</div>`;
+  }
+  function openPalette(prefix = "") {
+    scrim.classList.add("open"); q.value = prefix ? prefix + ": " : ""; sel = 0; renderResults(); q.focus();
+  }
+  function choose(i) {
+    scrim.classList.remove("open");
+    if (i?.go) show(i.go);
+    if (i?.kind === "model") document.getElementById("model-name").textContent = i.t;
+  }
+  document.querySelectorAll("[data-open-palette]").forEach(b => b.addEventListener("click", () => openPalette(b.dataset.openPalette)));
+  q.addEventListener("input", () => { sel = 0; renderResults(); });
+  q.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { sel = Math.min(sel + 1, shown.length - 1); renderResults(); e.preventDefault(); }
+    if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); renderResults(); e.preventDefault(); }
+    if (e.key === "Enter") choose(shown[sel]);
+  });
+  document.getElementById("results").addEventListener("click", e => { const r = e.target.closest("[data-n]"); if (r) choose(shown[+r.dataset.n]); });
+  scrim.addEventListener("mousedown", e => { if (e.target === scrim) scrim.classList.remove("open"); });
+
+  const drawer = document.getElementById("drawer");
+  document.getElementById("term-btn").onclick = () => drawer.classList.toggle("open");
+  window.addEventListener("keydown", e => {
+    if (e.metaKey && e.key === "k") { e.preventDefault(); openPalette(); }
+    if (e.ctrlKey && e.key === "`") drawer.classList.toggle("open");
+    if (e.key === "Escape") { scrim.classList.remove("open"); drawer.classList.remove("open"); }
+  });
+
+  show("pi");
+</script>
+</body>
+</html>

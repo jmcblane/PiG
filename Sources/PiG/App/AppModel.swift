@@ -725,7 +725,7 @@ final class AppModel: ObservableObject {
             removedIDs = [itemID]
         }
         guard !removedIDs.contains(where: {
-            inboxController(for: $0)?.showsActivityIndicator == true || inboxHermesController(for: $0)?.isWorking == true
+            inboxController(for: $0)?.hasLiveWork == true || inboxHermesController(for: $0)?.isWorking == true
         }) else {
             statusLine = "A working session cannot be marked done."
             return
@@ -1024,7 +1024,7 @@ final class AppModel: ObservableObject {
             closeQuickChat(controller)
             return
         }
-        guard !controller.showsActivityIndicator else {
+        guard !controller.hasLiveWork else {
             statusLine = "Cannot unload a working session. Abort or wait for it to finish."
             return
         }
@@ -1038,7 +1038,7 @@ final class AppModel: ObservableObject {
 
     func closeQuickChat(_ controller: SessionController) {
         guard controller.isQuickChat else { return }
-        guard !controller.showsActivityIndicator else {
+        guard !controller.hasLiveWork else {
             statusLine = "Cannot close a working quick chat. Abort or wait for it to finish."
             return
         }
@@ -1052,7 +1052,7 @@ final class AppModel: ObservableObject {
 
     func closeOtherQuickChats(keeping controller: SessionController?) {
         var count = 0
-        for item in quickChatControllers where item.id != controller?.id && !item.showsActivityIndicator {
+        for item in quickChatControllers where item.id != controller?.id && !item.hasLiveWork {
             removeController(item)
             count += 1
         }
@@ -1061,7 +1061,7 @@ final class AppModel: ObservableObject {
 
     func closeAllQuickChats() {
         var count = 0
-        for item in quickChatControllers where !item.showsActivityIndicator {
+        for item in quickChatControllers where !item.hasLiveWork {
             removeController(item)
             count += 1
         }
@@ -1184,7 +1184,7 @@ final class AppModel: ObservableObject {
 
     func deleteSession(_ request: SessionDeletionRequest) {
         sessionPendingDeletion = nil
-        if let controller = controller(forSessionPath: request.filePath), controller.showsActivityIndicator {
+        if let controller = controller(forSessionPath: request.filePath), controller.hasLiveWork {
             statusLine = "Cannot delete a working session. Abort or wait for it to finish."
             return
         }
@@ -1222,7 +1222,7 @@ final class AppModel: ObservableObject {
     }
 
     private func requestSessionDeletion(filePath: String, projectPath: String, title: String) {
-        if let controller = controller(forSessionPath: filePath), controller.showsActivityIndicator {
+        if let controller = controller(forSessionPath: filePath), controller.hasLiveWork {
             statusLine = "Cannot delete a working session. Abort or wait for it to finish."
             return
         }
@@ -1235,7 +1235,7 @@ final class AppModel: ObservableObject {
 
     func unloadOtherSessions(keeping controller: SessionController?) {
         var count = 0
-        for item in controllers.values where item.id != controller?.id && item.isProcessActive && !item.showsActivityIndicator {
+        for item in controllers.values where item.id != controller?.id && item.isProcessActive && !item.hasLiveWork {
             item.stopRPC()
             count += 1
         }
@@ -1244,7 +1244,7 @@ final class AppModel: ObservableObject {
 
     func unloadAllIdleSessions(includeSelected: Bool = true) {
         var count = 0
-        for item in controllers.values where item.isProcessActive && !item.showsActivityIndicator {
+        for item in controllers.values where item.isProcessActive && !item.hasLiveWork {
             if !includeSelected, item.id == selectedControllerID { continue }
             item.stopRPC()
             count += 1
@@ -1262,7 +1262,7 @@ final class AppModel: ObservableObject {
     }
 
     private func isIdlePersistentRuntime(_ controller: SessionController) -> Bool {
-        !controller.isQuickChat && controller.isProcessActive && !controller.showsActivityIndicator
+        !controller.isQuickChat && controller.isProcessActive && !controller.hasLiveWork
     }
 
     func canReloadSessionRuntime(_ controller: SessionController?) -> Bool {
@@ -1309,7 +1309,7 @@ final class AppModel: ObservableObject {
 
     func reloadAllIdleSessionRuntimes() {
         let candidates = controllers.values.filter { isIdlePersistentRuntime($0) }
-        let skipped = controllers.values.filter { !$0.isQuickChat && $0.isProcessActive && $0.showsActivityIndicator }.count
+        let skipped = controllers.values.filter { !$0.isQuickChat && $0.isProcessActive && $0.hasLiveWork }.count
         guard !candidates.isEmpty else {
             statusLine = skipped > 0 ? "No idle session runtimes to reload; \(skipped) working." : "No loaded session runtimes to reload."
             return
@@ -1340,7 +1340,7 @@ final class AppModel: ObservableObject {
         await loadSessionNamingModels()
 
         let candidates = controllers.values.filter { isIdlePersistentRuntime($0) }
-        let working = controllers.values.filter { !$0.isQuickChat && $0.isProcessActive && $0.showsActivityIndicator }.count
+        let working = controllers.values.filter { !$0.isQuickChat && $0.isProcessActive && $0.hasLiveWork }.count
         guard !candidates.isEmpty else {
             statusLine = working > 0
                 ? "Model catalogs refreshed. Reload working session runtimes after they settle to load new models."
@@ -1437,7 +1437,7 @@ final class AppModel: ObservableObject {
     }
 
     func refreshUsageLimit(for provider: UsageLimitProvider?) {
-        guard let provider else { return }
+        guard let provider, provider != .claudeBridge else { return }
         Task { [weak self] in
             _ = await PiEnvironment.mergedAsync()
             let snapshot = await UsageLimitService.fetch(provider)
@@ -1450,7 +1450,7 @@ final class AppModel: ObservableObject {
         usageLimitTask = Task { [weak self] in
             _ = await PiEnvironment.mergedAsync()
             while !Task.isCancelled {
-                if let provider = self?.selectedUsageLimitProvider {
+                if let provider = self?.selectedUsageLimitProvider, provider != .claudeBridge {
                     let snapshot = await UsageLimitService.fetch(provider)
                     guard !Task.isCancelled else { break }
                     self?.usageLimits[provider] = snapshot
@@ -1496,7 +1496,7 @@ final class AppModel: ObservableObject {
         controllers.values.filter { controller in
             controller.isProcessActive &&
             !controller.isQuickChat &&
-            !controller.showsActivityIndicator &&
+            !controller.hasLiveWork &&
             !finishedUnseenControllerIDs.contains(controller.id) &&
             (includeSelected || controller.id != selectedControllerID)
         }

@@ -120,6 +120,21 @@ struct ToolActivityView: View {
                 disclosureButton
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
+                // Running background jobs stay in view as one line each while the turn is folded.
+                let runningJobs = group.tools.filter { $0.backgroundJob != nil && $0.status == .running }
+                if !runningJobs.isEmpty {
+                    ToolGroupView(tools: runningJobs, projectPath: projectPath)
+                        .padding(.leading, 12)
+                        .padding(.bottom, 6)
+                        .overlay(alignment: .leading) {
+                            VerticalLine()
+                                .stroke(appTheme.toolRunning.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                                .frame(width: 1)
+                                .padding(.leading, 18)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                }
             }
         }
         .onAppear { observedActiveTurn = group.isActive }
@@ -256,6 +271,78 @@ struct ToolActivityView: View {
     }
 }
 
+private struct VerticalLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        return path
+    }
+}
+
+/// A finished `background` job, shown where a prompt would start the turn it woke.
+struct BackgroundJobResultView: View {
+    @Environment(\.appTheme) private var appTheme
+    let message: ChatMessage
+    let projectPath: String?
+    let isHighlighted: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "arrow.uturn.backward")
+                .font(AppFonts.ui(12, weight: .semibold))
+                .foregroundStyle(appTheme.brass)
+                .frame(width: 14, height: 26)
+                .accessibilityLabel("Background job finished")
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(message.tools) { tool in
+                    ToolRow(tool: tool, projectPath: projectPath)
+                        .padding(.vertical, 2)
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [appTheme.brass.opacity(isHighlighted ? 0.24 : 0.10), appTheme.brass.opacity(0)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
+        .overlay(alignment: .leading) {
+            Rectangle().fill(appTheme.brass).frame(width: 2)
+        }
+        .padding(.top, 8)
+        .animation(.easeOut(duration: 0.22), value: isHighlighted)
+    }
+}
+
+/// Elapsed time of a running background job, or the run time of a finished one.
+private struct BackgroundJobTime: View {
+    @Environment(\.appTheme) private var appTheme
+    let job: BackgroundJobInfo
+    let isRunning: Bool
+
+    var body: some View {
+        if isRunning, let start = job.startedAt {
+            TimelineView(.periodic(from: start, by: 1)) { context in
+                label(context.date.timeIntervalSince(start))
+            }
+        } else if let duration = job.duration {
+            label(duration)
+        }
+    }
+
+    private func label(_ seconds: TimeInterval) -> some View {
+        Text(TurnTiming.format(seconds))
+            .font(AppFonts.code(11.5))
+            .monospacedDigit()
+            .foregroundStyle(appTheme.muted)
+    }
+}
+
 struct ToolGroupView: View {
     let tools: [ToolDisplay]
     let projectPath: String?
@@ -320,8 +407,14 @@ struct ToolRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let tool: ToolDisplay
     let projectPath: String?
+    @Environment(\.revealMessage) private var revealMessage
     @State private var expansion: ToolExpansion = .collapsed
     @State private var prepared: PreparedToolRow?
+
+    /// User commands and background shell jobs step through the last 10 lines before all output.
+    private var cyclesExpansion: Bool {
+        tool.userLabel != nil || (tool.backgroundJob != nil && tool.shortName == "bash")
+    }
 
     private var expanded: Bool { expansion != .collapsed }
     @State private var showingCommand = false
@@ -330,19 +423,33 @@ struct ToolRow: View {
     init(tool: ToolDisplay, projectPath: String?) {
         self.tool = tool
         self.projectPath = projectPath
-        _expansion = State(initialValue: tool.userLabel != nil ? .partial : (Self.isSubagent(tool) && tool.status == .running ? .full : .collapsed))
+        // Background jobs keep to one line until opened.
+        let initial: ToolExpansion = tool.backgroundJob != nil ? .collapsed
+            : tool.userLabel != nil ? .partial
+            : Self.isSubagent(tool) && tool.status == .running ? .full : .collapsed
+        _expansion = State(initialValue: initial)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
                 Button {
+                    if let target = tool.backgroundJob?.resultMessageID {
+                        revealMessage?(target)
+                        return
+                    }
                     guard tool.hasExpandableDetails else { return }
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.12)) {
-                        expansion = tool.userLabel != nil ? expansion.next : (expanded ? .collapsed : .full)
+                        expansion = cyclesExpansion ? expansion.next : (expanded ? .collapsed : .full)
                     }
                 } label: {
                     HStack(spacing: 7) {
+                        if let job = tool.backgroundJob, job.id > 0 {
+                            Text("job \(job.id)")
+                                .font(AppFonts.code(12, weight: .bold))
+                                .foregroundStyle(appTheme.secondaryText)
+                                .lineLimit(1)
+                        }
                         if let label = customActionLabel {
                             Text(label)
                                 .font(AppFonts.code(12, weight: .bold))
@@ -355,7 +462,7 @@ struct ToolRow: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(tool.hasExpandableDetails ? (tool.userLabel != nil ? expansion.actionLabel : (expanded ? "Hide tool details" : "Show tool details")) : (prepared?.title ?? tool.shortName.capitalized))
+                .help(tool.backgroundJob?.resultMessageID != nil ? "Show result" : tool.hasExpandableDetails ? (cyclesExpansion ? expansion.actionLabel : (expanded ? "Hide tool details" : "Show tool details")) : (prepared?.title ?? tool.shortName.capitalized))
                 .accessibilityValue(expansion == .partial ? "Last 10 lines" : (expanded ? "Expanded" : "Collapsed"))
                 .frame(minWidth: 0)
 
@@ -367,6 +474,22 @@ struct ToolRow: View {
                 }
 
                 Spacer(minLength: 0)
+
+                if let job = tool.backgroundJob {
+                    BackgroundJobTime(job: job, isRunning: tool.status == .running)
+                    if let target = job.resultMessageID {
+                        Button { revealMessage?(target) } label: {
+                            Image(systemName: "arrow.down")
+                                .font(AppFonts.ui(11, weight: .semibold))
+                                .foregroundStyle(appTheme.brass)
+                                .frame(width: 22, height: 22)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Show result")
+                        .accessibilityLabel("Show result")
+                    }
+                }
             }
             .onHover { hovering = $0 }
 
@@ -414,7 +537,7 @@ struct ToolRow: View {
             prepared = value
         }
         .onChange(of: tool.status) { _, status in
-            if status == .running, Self.isSubagent(tool) {
+            if status == .running, Self.isSubagent(tool), tool.backgroundJob == nil {
                 expansion = .full
             }
         }
@@ -539,8 +662,49 @@ struct ToolDetailsView: View {
         switch tool.shortName {
         case "bash": BashToolDetailsView(tool: tool)
         case "subagent", "delegate_agent": SubagentToolDetailsView(tool: tool)
+        case "codemode": CodemodeToolDetailsView(tool: tool)
         default: FallbackToolDetailsView(tool: tool)
         }
+    }
+}
+
+/// The calls a codemode script made, one aligned line each, then its output.
+struct CodemodeToolDetailsView: View {
+    @Environment(\.appTheme) private var appTheme
+    let tool: ToolDisplay
+
+    var body: some View {
+        let calls = tool.codemodeCalls
+        let output = tool.codemodeOutput
+        VStack(alignment: .leading, spacing: 8) {
+            if !calls.isEmpty {
+                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 3) {
+                    ForEach(calls) { call in
+                        GridRow {
+                            Text(call.name)
+                                .foregroundStyle(call.failed ? appTheme.danger : appTheme.secondaryText)
+                            Text(call.subject)
+                                .foregroundStyle(call.failed ? appTheme.danger : appTheme.muted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(call.durationMs.map(Self.duration) ?? "")
+                                .foregroundStyle(appTheme.muted)
+                                .gridColumnAlignment(.trailing)
+                        }
+                    }
+                }
+                .font(AppFonts.code(12))
+                .textSelection(.enabled)
+            }
+            if !output.isEmpty {
+                DetailSection(title: "Output", maxHeight: 520) { output }
+            }
+        }
+    }
+
+    private static func duration(_ ms: Double) -> String {
+        ms < 1000 ? "\(Int(ms.rounded()))ms" : String(format: "%.1fs", ms / 1000)
     }
 }
 

@@ -4,11 +4,22 @@ import Foundation
 // pi's agent directory or added to its persistent settings.
 enum PiGBundledExtensions {
     static func addingTo(_ resources: PiLaunchResources) throws -> PiLaunchResources {
-        guard HTMLRenderPreference.isEnabled else { return resources }
+        let names = ["claude-usage"] + (HTMLRenderPreference.isEnabled ? ["html-render"] : [])
+        var result = resources
+        for name in names {
+            let extensionURL = try bundledExtension(named: name)
+            if !result.extensions.contains(extensionURL.path) {
+                result.extensions.append(extensionURL.path)
+            }
+        }
+        return result
+    }
+
+    private static func bundledExtension(named name: String) throws -> URL {
         let extensionURL: URL
         if Bundle.main.bundleURL.pathExtension == "app" {
-            guard let url = Bundle.main.url(forResource: "html-render", withExtension: "ts", subdirectory: "extensions") else {
-                throw PiRPCClient.RPCError.launchFailed("PiG's bundled HTML extension is missing. Rebuild the app.")
+            guard let url = Bundle.main.url(forResource: name, withExtension: "ts", subdirectory: "extensions") else {
+                throw PiRPCClient.RPCError.launchFailed("PiG's bundled \(name) extension is missing. Rebuild the app.")
             }
             extensionURL = url
         } else {
@@ -18,15 +29,11 @@ enum PiGBundledExtensions {
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
-                .appendingPathComponent("Resources/extensions/html-render.ts")
+                .appendingPathComponent("Resources/extensions/\(name).ts")
         }
         guard FileManager.default.isReadableFile(atPath: extensionURL.path) else {
-            throw PiRPCClient.RPCError.launchFailed("PiG's HTML extension could not be found at \(extensionURL.path).")
+            throw PiRPCClient.RPCError.launchFailed("PiG's \(name) extension could not be found at \(extensionURL.path).")
         }
-        var result = resources
-        if !result.extensions.contains(extensionURL.path) {
-            result.extensions.append(extensionURL.path)
-        }
-        return result
+        return extensionURL
     }
 }
