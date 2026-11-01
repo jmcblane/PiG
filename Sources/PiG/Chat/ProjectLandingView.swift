@@ -211,7 +211,7 @@ private struct ProjectLandingView: View {
                     .foregroundStyle(appTheme.text)
                 Spacer()
                 Button {
-                    NotificationCenter.default.post(name: .pigRevealSidebarSearch, object: nil)
+                    NotificationCenter.default.post(name: .pigOpenPalette, object: PaletteScope.sessions.rawValue)
                 } label: {
                     Text("Search all ⌘F")
                 }

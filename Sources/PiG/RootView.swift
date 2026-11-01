@@ -11,6 +11,7 @@ struct RootView: View {
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
     @State private var renameText = ""
+    @State private var paletteScope: PaletteScope?
 
     var body: some View {
         GeometryReader { geometry in
@@ -31,6 +32,12 @@ struct RootView: View {
                 .padding(.trailing, 16)
                 .frame(width: size.width, height: size.height, alignment: .topTrailing)
                 .zIndex(10)
+
+                if let scope = paletteScope {
+                    CommandPalette(initialScope: scope) { paletteScope = nil }
+                        .frame(width: size.width, height: size.height)
+                        .zIndex(15)
+                }
 
                 if let promptController = model.extensionPromptController,
                    let prompt = promptController.extensionUIPrompt {
@@ -67,6 +74,10 @@ struct RootView: View {
             }
         }
         .ignoresSafeArea(.container, edges: .top)
+        .onReceive(NotificationCenter.default.publisher(for: .pigOpenPalette)) { notification in
+            let scope = (notification.object as? String).flatMap(PaletteScope.init(rawValue:)) ?? .all
+            paletteScope = paletteScope == scope ? nil : scope
+        }
         .background(appTheme.background)
         .font(AppFonts.ui(14))
         .sheet(item: Binding(

@@ -91,6 +91,13 @@ private struct CastTrailingControls: View {
 
     var body: some View {
         HStack(spacing: 4) {
+            Button {
+                NotificationCenter.default.post(name: .pigOpenPalette, object: nil)
+            } label: {
+                Image(systemName: "magnifyingglass")
+            }
+            .buttonStyle(TitlebarIconButtonStyle())
+            .help("Go to anything (⌘K)")
             Group {
                 AppUpdateButton(updates: model.appUpdates)
                 PiUpdateButton(maintenance: model.piMaintenance)
@@ -522,25 +529,20 @@ private struct CastThinkingBubble: View {
 
 private struct CastOverflowButton: View {
     @Environment(\.appTheme) private var appTheme
-    @EnvironmentObject private var model: AppModel
     let entries: [CastEntry]
 
     var body: some View {
-        Menu {
-            ForEach(entries) { entry in
-                Button(model.inboxItemTitle(entry.id)) { model.selectInboxItem(entry.id) }
-            }
+        Button {
+            NotificationCenter.default.post(name: .pigOpenPalette, object: PaletteScope.chats.rawValue)
         } label: {
             Text("+\(entries.count)")
                 .font(AppFonts.ui(12, weight: .semibold))
                 .foregroundStyle(appTheme.secondaryText)
                 .frame(width: 36, height: 36)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(appTheme.panel2))
+                .contentShape(Rectangle())
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
         .help("More open chats")
     }
 }
@@ -637,6 +639,40 @@ extension AppModel {
             return controller.title.isEmpty ? (controller.isQuickChat ? "Quick chat" : "Untitled") : controller.title
         }
         return inboxSummary(for: itemID)?.title ?? "Untitled"
+    }
+
+    func inboxItemSubtitle(_ itemID: String) -> String {
+        if let chat = inboxHermesChat(for: itemID) { return hermesAgent(for: chat)?.name ?? "Hermes" }
+        if let controller = inboxController(for: itemID) {
+            return agent(for: controller)?.name ?? (controller.isQuickChat ? "Quick chat" : controller.projectName)
+        }
+        guard let summary = inboxSummary(for: itemID) else { return "" }
+        if let agent = agent(forSessionPath: summary.filePath) { return agent.name }
+        return isQuickChatInboxItem(itemID) ? "Quick chat" : projectDisplayName(for: summary.projectPath)
+    }
+
+    func inboxItemLook(_ itemID: String) -> Look {
+        if let chat = inboxHermesChat(for: itemID) {
+            return hermesAgent(for: chat)?.look ?? Look.seeded(key: chat.id, projectPath: nil)
+        }
+        if let controller = inboxController(for: itemID) {
+            return agent(for: controller)?.look ?? Look.seeded(
+                key: controller.sessionPath ?? controller.id,
+                projectPath: controller.isQuickChat ? nil : controller.projectPath
+            )
+        }
+        guard let summary = inboxSummary(for: itemID) else { return Look.seeded(key: itemID, projectPath: nil) }
+        return sessionLook(summary)
+    }
+
+    func sessionLook(_ summary: SessionSummary) -> Look {
+        agent(forSessionPath: summary.filePath)?.look
+            ?? Look.seeded(key: summary.filePath, projectPath: isQuickChatsProject(summary.projectPath) ? nil : summary.projectPath)
+    }
+
+    /// Inbox ID of the selected chat, if it is open in the cast.
+    var selectedInboxItemID: String? {
+        sessionInboxIDs.first { isInboxItemSelected($0) }
     }
 
     func selectInboxItem(_ itemID: String) {

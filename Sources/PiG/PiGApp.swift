@@ -57,8 +57,12 @@ struct PiGApp: App {
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 Divider()
+                Button("Go to Anything…") {
+                    NotificationCenter.default.post(name: .pigOpenPalette, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
                 Button("Search Sessions") {
-                    NotificationCenter.default.post(name: .pigRevealSidebarSearch, object: nil)
+                    NotificationCenter.default.post(name: .pigOpenPalette, object: PaletteScope.sessions.rawValue)
                 }
                 .keyboardShortcut("f", modifiers: .command)
                 Button("Toggle Fullscreen Terminal") {
