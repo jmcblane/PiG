@@ -127,8 +127,13 @@ struct CommandPalette: View {
             DispatchQueue.main.async { fieldFocused = true }
             sessionCache = buildSessionItems()
             if model.sessionArchiveLoadState == .idle { model.loadSessionArchive() }
-            // The text field consumes Delete before SwiftUI key handlers see it.
+            // The text field consumes Delete and Ctrl-N/P before SwiftUI key handlers see them.
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                if modifiers == .control, let key = event.charactersIgnoringModifiers?.lowercased(), key == "n" || key == "p" {
+                    move(key == "n" ? 1 : -1, in: self.results())
+                    return nil
+                }
                 guard event.keyCode == 51, query.isEmpty, scope != .all else { return event }
                 scope = .all
                 return nil
