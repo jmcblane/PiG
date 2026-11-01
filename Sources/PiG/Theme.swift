@@ -104,6 +104,7 @@ private extension ThemeRGB {
 
 enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
     case defaultTheme = "default"
+    case dusk = "dusk"
     case oxocarbonDark = "oxocarbonDark"
     case seoul256 = "seoul256"
     case nord = "nord"
@@ -123,7 +124,8 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
 
     var displayName: String {
         switch self {
-        case .defaultTheme: return "Finder Blue (Default)"
+        case .defaultTheme: return "Finder Blue"
+        case .dusk: return "Dusk (Default)"
         case .oxocarbonDark: return "Oxocarbon Dark"
         case .seoul256: return "Seoul256"
         case .nord: return "Nord"
@@ -140,7 +142,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
     }
 
     static var stored: AppThemeChoice {
-        get { AppThemeChoice(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .defaultTheme }
+        get { AppThemeChoice(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .dusk }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: storageKey) }
     }
 
@@ -182,6 +184,36 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                     quoteForeground: MarkdownColor(hex: 0xb9bec5),
                     link: MarkdownColor(hex: 0x73baff),
                     tableHeaderBackground: MarkdownColor(hex: 0x4ca8ff, opacity: 0.14),
+                    evenRowBackground: MarkdownColor(hex: 0xffffff, opacity: 0.03)
+                )
+            )
+        case .dusk:
+            return AppThemePalette(
+                background: ThemeRGB(hex: 0x262036),
+                panel: ThemeRGB(hex: 0x2f2843),
+                panel2: ThemeRGB(hex: 0x3a3152),
+                line: ThemeRGB(hex: 0x433a58),
+                lineBright: ThemeRGB(hex: 0xffb38a),
+                text: ThemeRGB(hex: 0xf1ecf8),
+                secondaryText: ThemeRGB(hex: 0xc0b6d3),
+                muted: ThemeRGB(hex: 0x948aa9),
+                accent: ThemeRGB(hex: 0xffb38a),
+                danger: ThemeRGB(hex: 0xff8fae),
+                good: ThemeRGB(hex: 0x8fe3c4),
+                userRow: ThemeRGB(hex: 0x382f50),
+                codeText: ThemeRGB(hex: 0xffc9a8),
+                codeBackground: ThemeRGB(hex: 0x1e192c),
+                markdown: MarkdownThemePalette(
+                    userForeground: MarkdownColor(hex: 0xf1ecf8),
+                    assistantForeground: MarkdownColor(hex: 0xe4ddef),
+                    strong: MarkdownColor(hex: 0xfaf7fd),
+                    emphasis: MarkdownColor(hex: 0xffc9a8),
+                    deleted: MarkdownColor(hex: 0x948aa9),
+                    codeBackground: MarkdownColor(hex: 0xffb38a, opacity: 0.10),
+                    codeBorder: MarkdownColor(hex: 0xffb38a, opacity: 0.22),
+                    quoteForeground: MarkdownColor(hex: 0xc0b6d3),
+                    link: MarkdownColor(hex: 0x9ab8ff),
+                    tableHeaderBackground: MarkdownColor(hex: 0xffb38a, opacity: 0.12),
                     evenRowBackground: MarkdownColor(hex: 0xffffff, opacity: 0.03)
                 )
             )
@@ -630,7 +662,7 @@ struct AppTheme: Hashable {
 }
 
 private struct AppThemeEnvironmentKey: EnvironmentKey {
-    static let defaultValue = AppTheme(choice: .defaultTheme)
+    static let defaultValue = AppTheme(choice: .dusk)
 }
 
 extension EnvironmentValues {

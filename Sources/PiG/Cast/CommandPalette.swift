@@ -425,6 +425,11 @@ struct CommandPalette: View {
                 projectName: model.selectedProject?.displayName
             )
         }
+        for theme in AppThemeChoice.allCases where theme != model.selectedTheme {
+            add("theme:\(theme.rawValue)", "Theme: \(theme.displayName)", "paintpalette", keywords: "appearance color") {
+                model.selectedTheme = theme
+            }
+        }
         add("settings", "Settings…", "gearshape", shortcut: "⌘,") { openSettings() }
         return items
     }

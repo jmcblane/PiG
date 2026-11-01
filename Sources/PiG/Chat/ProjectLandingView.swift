@@ -57,13 +57,16 @@ struct ChatTabContent: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Chat errors surface via the single arbitrated toast in
         // RootView plus the 'Last error' affordance near the composer.
-        ExtensionWidgetsView(widgets: widgets(for: controller, placement: .aboveEditor))
-        ExtensionStatusView(statuses: controller.extensionUIStatuses)
-        if !controller.chatResources.isEmpty {
-            ChatResourceChips(items: controller.chatResources)
-                .padding(.horizontal, 20)
-                .padding(.top, 6)
+        VStack(spacing: 0) {
+            ExtensionWidgetsView(widgets: widgets(for: controller, placement: .aboveEditor))
+            ExtensionStatusView(statuses: controller.extensionUIStatuses)
+            if !controller.chatResources.isEmpty {
+                ChatResourceChips(items: controller.chatResources)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 6)
+            }
         }
+        .frame(maxWidth: 800)
         ComposerView(controller: controller, draft: $draft, imageAttachments: $imageAttachments)
         ExtensionWidgetsView(widgets: widgets(for: controller, placement: .belowEditor))
             .padding(.top, -10)

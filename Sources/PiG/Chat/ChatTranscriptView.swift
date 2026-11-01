@@ -165,6 +165,8 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                         // controller.errorText surfaces via the arbitrated root toast
                         // plus the 'Last error' affordance near the composer.
                     }
+                    // One readable column, centered like the composer below it.
+                    .frame(maxWidth: 800)
                     .padding(.top, 6)
                     .padding(.bottom, bottomContentGap)
                     // Size the transcript to its ideal height before the
@@ -173,10 +175,10 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                     // child (a markdown table cell) swallows it, which is what
                     // produced the giant blank table rows.
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(minHeight: geometry.size.height, alignment: .bottomLeading)
+                    .frame(minHeight: geometry.size.height, alignment: .bottom)
                     // Explicit width so NSHostingView's fittingSize measures the
                     // wrapped (width-constrained) height, not the ideal width.
-                    .frame(width: geometry.size.width, alignment: .bottomLeading)
+                    .frame(width: geometry.size.width, alignment: .bottom)
                 }
                 .onAppear { forceScrollToken += 1 }
                 .onChange(of: controller.id) { _, _ in forceScrollToken += 1 }

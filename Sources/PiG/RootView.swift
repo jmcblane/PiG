@@ -74,6 +74,7 @@ struct RootView: View {
             }
         }
         .ignoresSafeArea(.container, edges: .top)
+        .background { WindowBackdrop() }
         .onReceive(NotificationCenter.default.publisher(for: .pigOpenPalette)) { notification in
             let scope = (notification.object as? String).flatMap(PaletteScope.init(rawValue:)) ?? .all
             paletteScope = paletteScope == scope ? nil : scope
@@ -98,6 +99,35 @@ struct RootView: View {
                 secondaryButton: .cancel()
             )
         }
+    }
+}
+
+/// Theme background; Dusk adds a warm glow from the top and a cool one from the corner.
+private struct WindowBackdrop: View {
+    @Environment(\.appTheme) private var appTheme
+
+    var body: some View {
+        ZStack {
+            appTheme.background
+            if appTheme.choice == .dusk {
+                GeometryReader { geometry in
+                    let size = geometry.size
+                    RadialGradient(
+                        colors: [appTheme.brass.opacity(0.13), .clear],
+                        center: UnitPoint(x: 0.5, y: -0.1),
+                        startRadius: 0,
+                        endRadius: max(size.width, size.height) * 0.6
+                    )
+                    RadialGradient(
+                        colors: [appTheme.good.opacity(0.06), .clear],
+                        center: .bottomTrailing,
+                        startRadius: 0,
+                        endRadius: max(size.width, size.height) * 0.55
+                    )
+                }
+            }
+        }
+        .ignoresSafeArea()
     }
 }
 

@@ -72,7 +72,7 @@ struct ChatPaneView: View {
                 .frame(width: size.width, height: size.height, alignment: .topLeading)
                 .clipped()
         }
-        .background(appTheme.background)
+        .background(Color.clear)
         .onAppear {
             if terminalWorkspace.mode.terminalVisible {
                 terminalWorkspace.ensureTab(workingDirectoryPath: currentTerminalWorkingDirectory)
