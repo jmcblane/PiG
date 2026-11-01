@@ -99,32 +99,7 @@ struct UsageLimitPopup: View {
     }
 }
 
-struct ContextUsageBar: View {
-    @Environment(\.appTheme) private var appTheme
-    let percent: Double?
-    let tokens: Int?
-    let window: Int?
-
-    var body: some View {
-        SegmentMeter(percent: percent, fill: color, empty: appTheme.line)
-            .help(help)
-    }
-
-    private var color: Color {
-        guard let percent else { return appTheme.muted }
-        if percent >= 85 { return appTheme.danger }
-        if percent >= 65 { return appTheme.brass }
-        return appTheme.good
-    }
-
-    private var help: String {
-        if let percent, let tokens, let window { return "Context: \(Int(percent))% · \(tokens) / \(window) tokens" }
-        if let percent { return "Context: \(Int(percent))%" }
-        return "Context usage unavailable"
-    }
-}
-
-/// 10-block meter for usage remaining / context used.
+/// 10-block meter for usage remaining.
 private struct SegmentMeter: View {
     let percent: Double?
     let fill: Color
@@ -144,6 +119,62 @@ private struct SegmentMeter: View {
     private var litCount: Int {
         guard let percent else { return 0 }
         return Int(round(min(max(percent, 0), 100) / 100 * Double(segments)))
+    }
+}
+
+/// Send (or abort) button ringed by the share of the context window in use.
+struct ContextRingSendButton: View {
+    @Environment(\.appTheme) private var appTheme
+    let percent: Double?
+    let tokens: Int?
+    let window: Int?
+    let aborting: Bool
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .stroke(appTheme.line.opacity(0.8), lineWidth: 2.5)
+                Circle()
+                    .trim(from: 0, to: min(1, max(0, (percent ?? 0) / 100)))
+                    .stroke(ringColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeOut(duration: 0.4), value: percent)
+                Circle()
+                    .fill(aborting ? appTheme.danger : appTheme.brass)
+                    .frame(width: 26, height: 26)
+                    .overlay(
+                        Image(systemName: aborting ? "stop.fill" : "arrow.up")
+                            .font(AppFonts.ui(12, weight: .bold))
+                            .foregroundStyle(aborting ? appTheme.dangerForeground : appTheme.accentForeground)
+                    )
+                    .opacity(disabled ? 0.45 : 1)
+            }
+            .frame(width: 36, height: 36)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .help(aborting ? "Abort" : "Send — \(contextHelp)")
+        .accessibilityLabel(aborting ? "Abort" : "Send")
+        .accessibilityValue(contextHelp)
+    }
+
+    private var ringColor: Color {
+        guard let percent else { return appTheme.muted }
+        if percent >= 85 { return appTheme.danger }
+        if percent >= 65 { return appTheme.brass }
+        return appTheme.good
+    }
+
+    private var contextHelp: String {
+        if let percent, let tokens, let window {
+            return "context \(Int(percent))% used (\(tokens.formatted()) of \(window.formatted()) tokens)"
+        }
+        if let percent { return "context \(Int(percent))% used" }
+        return "context usage unavailable"
     }
 }
 

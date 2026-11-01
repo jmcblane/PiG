@@ -76,6 +76,8 @@ struct ComposerView: View {
                     .padding(.top, 10)
                 }
                 HStack(alignment: .bottom, spacing: 10) {
+                    AgentAvatar(look: model.look(for: controller), size: 28)
+                        .padding(.bottom, 5)
                     GrowingComposerTextView(
                         text: $draft,
                         height: $entryHeight,
@@ -96,30 +98,22 @@ struct ComposerView: View {
                     )
                     .frame(maxWidth: .infinity)
                     .frame(height: max(entryHeight, AppFonts.scaled(15.5) + 20))
-                        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(appTheme.codeBackground.opacity(0.18)))
-                    Button {
+                    ContextRingSendButton(
+                        percent: controller.contextPercent,
+                        tokens: controller.contextTokens,
+                        window: controller.contextWindow,
+                        aborting: controller.canAbort,
+                        disabled: isSubmitting || controller.isSendingPrompt || (!controller.canAbort && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && imageAttachments.isEmpty)
+                    ) {
                         if controller.canAbort { Task { await controller.abort() } }
                         else { submit() }
-                    } label: {
-                        if controller.canAbort {
-                            Image(systemName: "stop.fill")
-                                .font(AppFonts.ui(14, weight: .bold))
-                                .frame(width: 34, height: 34)
-                        } else {
-                            Image(systemName: "arrow.right")
-                                .font(AppFonts.ui(14, weight: .bold))
-                                .frame(width: 34, height: 34)
-                        }
                     }
-                    .buttonStyle(SendButtonStyle(active: controller.canAbort))
-                    .disabled(isSubmitting || controller.isSendingPrompt || (!controller.canAbort && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && imageAttachments.isEmpty))
-                    .help(controller.canAbort ? "Abort" : "Send")
+                    .padding(.bottom, 1)
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 6)
+                .padding(.leading, 12)
+                .padding(.trailing, 10)
+                .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .bottomLeading)
-                ComposerToolbar(controller: controller)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: shellRadius, style: .continuous).fill(appTheme.panel.opacity(0.96)))
@@ -128,11 +122,15 @@ struct ComposerView: View {
                     .stroke(accentFocus ? appTheme.brass.opacity(0.55) : appTheme.line, lineWidth: 1)
             )
             .shadow(color: accentFocus ? appTheme.brass.opacity(0.12) : .clear, radius: accentFocus ? 8 : 0, y: 0)
+            .shadow(color: .black.opacity(appTheme.choice.isLight ? 0.08 : 0.3), radius: 18, y: 10)
+            ComposerToolbar(controller: controller)
+                .padding(.top, -2)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
         .padding(.top, 10)
-        .padding(.bottom, 14)
+        .padding(.bottom, 12)
         .onChange(of: draft) { _, value in
             suggestionsDismissed = false
             suggestionIndex = 0

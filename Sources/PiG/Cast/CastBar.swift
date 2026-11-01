@@ -301,10 +301,7 @@ private struct CastControllerMember: View {
         CastFaceButton(
             title: controller.title.isEmpty ? (controller.isQuickChat ? "Quick chat" : "Untitled") : controller.title,
             subtitle: agent?.name ?? (controller.isQuickChat ? "Quick chat" : controller.projectName),
-            look: agent?.look ?? Look.seeded(
-                key: controller.sessionPath ?? controller.id,
-                projectPath: controller.isQuickChat ? nil : controller.projectPath
-            ),
+            look: model.look(for: controller),
             status: controller.extensionUIPrompt != nil ? .needsInput
                 : working ? .working
                 : model.finishedUnseen(controller) ? .unread : .idle,
@@ -655,14 +652,16 @@ extension AppModel {
         if let chat = inboxHermesChat(for: itemID) {
             return hermesAgent(for: chat)?.look ?? Look.seeded(key: chat.id, projectPath: nil)
         }
-        if let controller = inboxController(for: itemID) {
-            return agent(for: controller)?.look ?? Look.seeded(
-                key: controller.sessionPath ?? controller.id,
-                projectPath: controller.isQuickChat ? nil : controller.projectPath
-            )
-        }
+        if let controller = inboxController(for: itemID) { return look(for: controller) }
         guard let summary = inboxSummary(for: itemID) else { return Look.seeded(key: itemID, projectPath: nil) }
         return sessionLook(summary)
+    }
+
+    func look(for controller: SessionController) -> Look {
+        agent(for: controller)?.look ?? Look.seeded(
+            key: controller.sessionPath ?? controller.id,
+            projectPath: controller.isQuickChat ? nil : controller.projectPath
+        )
     }
 
     func sessionLook(_ summary: SessionSummary) -> Look {

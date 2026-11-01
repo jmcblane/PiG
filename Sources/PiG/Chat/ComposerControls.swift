@@ -2,26 +2,20 @@ import SwiftUI
 import AppKit
 import ImageIO
 
+/// Model, thinking level, and subscription usage, shown under the composer.
 struct ComposerToolbar: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject var controller: SessionController
     @State private var usageProvider: UsageLimitProvider?
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            HStack(spacing: 0) {
-                ModelPickerMenu(controller: controller, value: selectedModelName)
-                    .help("Model")
-
-                ThinkingPickerMenu(controller: controller)
-                    .help("Reasoning")
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
+        HStack(alignment: .center, spacing: 6) {
+            ModelPickerMenu(controller: controller, value: selectedModelName)
+                .help("Model (⌘1–⌘5)")
+            ThinkingDial(controller: controller)
             Spacer(minLength: 8)
-            VStack(alignment: .leading, spacing: 4) {
-                if let usageProvider {
+            if let usageProvider {
+                Group {
                     if usageProvider == .claudeBridge {
                         UsageLimitIndicator(
                             snapshot: controller.claudeBridgeUsage ?? UsageLimitSnapshot(serviceName: "Claude Code"),
@@ -31,14 +25,11 @@ struct ComposerToolbar: View {
                         UsageLimitIndicator(snapshot: model.usageLimit(for: usageProvider)) { model.refreshUsageLimit(for: usageProvider) }
                     }
                 }
-                ContextUsageBar(percent: controller.contextPercent, tokens: controller.contextTokens, window: controller.contextWindow)
+                .frame(width: 84)
             }
-            .frame(width: 118, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 2)
-        .padding(.bottom, 8)
+        .padding(.leading, 44)
+        .padding(.trailing, 14)
         .task(id: selectedModel) {
             _ = await PiEnvironment.mergedAsync()
             let provider = UsageLimitProvider.from(model: selectedModel)
@@ -54,9 +45,63 @@ struct ComposerToolbar: View {
 
     private var selectedModelName: String {
         if controller.models.isEmpty { return "Loading…" }
-        return selectedModel?.displayName ?? controller.selectedModelID.nonEmptyTrimmed ?? "Select model"
+        guard let selectedModel else { return controller.selectedModelID.nonEmptyTrimmed ?? "Select model" }
+        return selectedModel.name.isEmpty ? selectedModel.modelId : selectedModel.name
+    }
+}
+
+/// Thinking level as rising bars. Click steps to the next level; right-click picks one.
+struct ThinkingDial: View {
+    @Environment(\.appTheme) private var appTheme
+    @ObservedObject var controller: SessionController
+    @State private var hovering = false
+
+    private var levels: [String] { controller.availableThinkingLevels }
+    private var index: Int { levels.firstIndex(of: controller.thinkingLevel) ?? 0 }
+
+    var body: some View {
+        Button {
+            guard !levels.isEmpty else { return }
+            controller.setThinkingLevel(levels[(index + 1) % levels.count])
+        } label: {
+            HStack(spacing: 6) {
+                HStack(alignment: .bottom, spacing: 2) {
+                    ForEach(1..<max(2, levels.count), id: \.self) { bar in
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(bar <= index ? appTheme.brass : appTheme.muted.opacity(0.45))
+                            .frame(width: 3, height: 3 + CGFloat(bar) * 9 / CGFloat(max(1, levels.count - 1)))
+                    }
+                }
+                .frame(height: 12, alignment: .bottom)
+                Text(Self.title(controller.thinkingLevel))
+                    .font(AppFonts.ui(11.5, weight: .medium))
+                    .foregroundStyle(hovering ? appTheme.text : appTheme.secondaryText)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Thinking level")
+        .contextMenu {
+            ForEach(levels, id: \.self) { level in
+                Button {
+                    controller.setThinkingLevel(level)
+                } label: {
+                    if level == controller.thinkingLevel {
+                        Label(Self.title(level), systemImage: "checkmark")
+                    } else {
+                        Text(Self.title(level))
+                    }
+                }
+            }
+        }
     }
 
+    static func title(_ level: String) -> String {
+        level == "xhigh" ? "Extra high" : level.capitalized
+    }
 }
 
 struct ModelPickerMenu: View {
@@ -190,57 +235,20 @@ struct ModelPickerMenu: View {
     }
 }
 
-struct ThinkingPickerMenu: View {
-    @Environment(\.appTheme) private var appTheme
-    @ObservedObject var controller: SessionController
-    @State private var isOpen = false
-    @State private var hovering = false
-
-    var body: some View {
-        Button { isOpen.toggle() } label: {
-            TabStripPickerLabel(
-                value: controller.thinkingLevel.capitalized,
-                dot: appTheme.codeText,
-                hovering: hovering
-            )
-        }
-        .buttonStyle(.plain)
-        .background(hovering ? Color.white.opacity(0.03) : Color.clear)
-        .onHover { hovering = $0 }
-        .popover(isPresented: $isOpen, arrowEdge: .top) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(controller.availableThinkingLevels, id: \.self) { level in
-                    PopoverPickerRow(title: level.capitalized, isSelected: level == controller.thinkingLevel) {
-                        controller.setThinkingLevel(level)
-                        isOpen = false
-                    }
-                }
-            }
-            .padding(.vertical, 5)
-            .frame(width: 130)
-        }
-    }
-}
-
 struct TabStripPickerLabel: View {
     @Environment(\.appTheme) private var appTheme
     let value: String
-    let dot: Color
+    var dot: Color? = nil
     let hovering: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
-            RoundedRectangle(cornerRadius: 1, style: .continuous)
-                .fill(dot)
-                .frame(width: 5, height: 5)
-            Text(value)
-                .font(AppFonts.ui(11.5, weight: .semibold))
-                .foregroundStyle(hovering ? appTheme.text : appTheme.secondaryText)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
+        Text(value)
+            .font(AppFonts.ui(11.5, weight: .medium))
+            .foregroundStyle(hovering ? appTheme.text : appTheme.secondaryText)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
     }
 }
 
