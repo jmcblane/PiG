@@ -38,12 +38,13 @@ struct InboxColumn: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            InboxNewChatRow()
-                .padding(.horizontal, 8)
-                .padding(.top, 4)
-                .padding(.bottom, 4)
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    // The title bar has new-chat buttons; the list offers them only when it's empty.
+                    if rootIDs.isEmpty {
+                        InboxLaunchRow(kind: .chat)
+                        InboxLaunchRow(kind: .quickChat)
+                    }
                     ForEach(rootIDs, id: \.self) { itemID in
                         row(itemID, isChild: model.inboxParentID(for: itemID) != nil)
                         ForEach(children(of: itemID), id: \.self) { childID in
@@ -51,16 +52,10 @@ struct InboxColumn: View {
                         }
                     }
                 }
+                .padding(.top, 6)
                 .padding(.bottom, 8)
             }
             .scrollIndicators(.automatic)
-            .overlay {
-                if rootIDs.isEmpty {
-                    Text("No open chats")
-                        .font(AppFonts.ui(12.5))
-                        .foregroundStyle(appTheme.muted)
-                }
-            }
             footer
         }
         .frame(width: Self.width)
@@ -120,72 +115,60 @@ struct InboxColumn: View {
     }
 }
 
-private struct InboxNewChatRow: View {
+/// New chat or quick chat, shown as list rows when no chats are open.
+private struct InboxLaunchRow: View {
+    enum Kind { case chat, quickChat }
+
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
+    let kind: Kind
     @State private var hovering = false
 
+    private var active: Bool {
+        guard model.isComposingNewChat else { return false }
+        return kind == .quickChat ? model.composingQuickChat : !model.composingQuickChat && model.selectedProjectPath != nil
+    }
+
     var body: some View {
-        Button(action: newChat) {
+        Button {
+            kind == .chat ? model.startNewChat() : model.showNewChatHome(quickChat: true)
+        } label: {
             HStack(spacing: 10) {
-                Image(systemName: "plus")
-                    .font(AppFonts.ui(11, weight: .semibold))
-                    .frame(width: 30, height: 30)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(appTheme.muted.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
-                    )
-                Text("New chat")
+                Group {
+                    if kind == .chat {
+                        Image(systemName: "plus")
+                            .font(AppFonts.ui(11, weight: .semibold))
+                            .frame(width: 30, height: 30)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(appTheme.muted.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+                            )
+                    } else {
+                        ChatIconView(icon: .quickChat, size: 30)
+                    }
+                }
+                Text(kind == .chat ? "New chat" : "Quick chat")
                     .font(AppFonts.ui(13))
                 Spacer(minLength: 0)
-                Text("⌘N")
+                Text(kind == .chat ? "⌘N" : "⇧⌘N")
                     .font(AppFonts.ui(11))
                     .foregroundStyle(appTheme.muted)
             }
-            .foregroundStyle(hovering || model.isComposingNewChat ? appTheme.text : appTheme.secondaryText)
+            .foregroundStyle(hovering || active ? appTheme.text : appTheme.secondaryText)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(model.isComposingNewChat ? appTheme.panel2 : hovering ? appTheme.panel.opacity(0.7) : .clear)
+                    .fill(active ? appTheme.panel2 : hovering ? appTheme.panel.opacity(0.7) : .clear)
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 1)
         .contextMenu {
-            if let path = model.selectedProject?.path {
-                Button("New Chat in \(model.projectDisplayName(for: path))", systemImage: "square.and.pencil") {
-                    model.showNewChatHome(projectPath: path)
-                }
-                ForEach(model.sessionLaunchExtensions) { item in
-                    Button("New Chat with \(item.displayName)", systemImage: "puzzlepiece.extension") {
-                        model.newSession(projectPath: path, extensionPaths: [item.path])
-                    }
-                }
-            }
-            Button("New Quick Chat", systemImage: "bolt.fill") { model.showNewChatHome(quickChat: true) }
-            ForEach(model.sessionLaunchExtensions) { item in
-                Button("New Quick Chat with \(item.displayName)", systemImage: "puzzlepiece.extension") {
-                    model.newQuickChat(extensionPaths: [item.path])
-                }
-            }
-            if !model.agents.isEmpty {
-                Divider()
-                ForEach(model.agents) { agent in
-                    Button("Chat with \(agent.name)") { model.selectAgent(agent.id) }
-                }
-            }
-        }
-    }
-
-    private func newChat() {
-        if let agent = model.selectedAgent {
-            model.selectAgent(agent.id)
-        } else if let path = model.selectedProject?.path {
-            model.showNewChatHome(projectPath: path)
-        } else {
-            model.showNewChatHome(quickChat: true)
+            if kind == .chat { NewChatMenuItems() } else { NewQuickChatMenuItems() }
         }
     }
 }

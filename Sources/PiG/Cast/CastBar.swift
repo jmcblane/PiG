@@ -2,37 +2,85 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-/// Window top bar: inbox toggle, files, the current room (project or agent), the open
-/// chat's title, and window controls.
+/// Window top bar: inbox toggle, files, the current room (project or agent), new-chat
+/// buttons, and window controls.
 struct CastBar: View {
     static let height: CGFloat = 44
-    @State private var leadingWidth: CGFloat = 200
-    @State private var trailingWidth: CGFloat = 200
 
     var body: some View {
-        GeometryReader { geometry in
-            // The title stays centered, so it gets twice the wider side's clearance.
-            let side = max(leadingWidth, trailingWidth) + 12
-            ZStack {
-                WindowDragArea()
-                HStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        Color.clear.frame(width: 78)
-                        InboxToggleButton()
-                        CastFilesButton()
-                        CastRoomButton()
-                    }
-                    .measureWidth { leadingWidth = $0 }
-                    Spacer(minLength: 0)
-                    CastTrailingControls()
-                        .padding(.trailing, 12)
-                        .measureWidth { trailingWidth = $0 }
-                }
-                CastTitle()
-                    .frame(maxWidth: max(0, geometry.size.width - side * 2))
+        ZStack {
+            WindowDragArea()
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 78)
+                InboxToggleButton()
+                CastFilesButton()
+                CastRoomButton()
+                NewChatButtons()
+                    .padding(.leading, 6)
+                Spacer(minLength: 0)
+                CastTrailingControls()
+                    .padding(.trailing, 12)
             }
         }
         .frame(height: Self.height)
+    }
+}
+
+private struct NewChatButtons: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button { model.startNewChat() } label: {
+                Image(systemName: "square.and.pencil")
+            }
+            .buttonStyle(TitlebarIconButtonStyle())
+            .help(model.sessionLaunchExtensions.isEmpty ? "New chat (⌘N)" : "New chat (⌘N) — right-click for more")
+            .contextMenu { NewChatMenuItems() }
+
+            Button { model.showNewChatHome(quickChat: true) } label: {
+                Image(systemName: "bolt.fill")
+            }
+            .buttonStyle(TitlebarIconButtonStyle())
+            .help(model.sessionLaunchExtensions.isEmpty ? "New quick chat (⇧⌘N)" : "New quick chat (⇧⌘N) — right-click for more")
+            .contextMenu { NewQuickChatMenuItems() }
+        }
+    }
+}
+
+struct NewChatMenuItems: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        if let path = model.selectedProject?.path {
+            Button("New Chat in \(model.projectDisplayName(for: path))", systemImage: "square.and.pencil") {
+                model.showNewChatHome(projectPath: path)
+            }
+            ForEach(model.sessionLaunchExtensions) { item in
+                Button("New Chat with \(item.displayName)", systemImage: "puzzlepiece.extension") {
+                    model.newSession(projectPath: path, extensionPaths: [item.path])
+                }
+            }
+        }
+        if !model.agents.isEmpty {
+            Divider()
+            ForEach(model.agents) { agent in
+                Button("Chat with \(agent.name)") { model.selectAgent(agent.id) }
+            }
+        }
+    }
+}
+
+struct NewQuickChatMenuItems: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Button("New Quick Chat", systemImage: "bolt.fill") { model.showNewChatHome(quickChat: true) }
+        ForEach(model.sessionLaunchExtensions) { item in
+            Button("New Quick Chat with \(item.displayName)", systemImage: "puzzlepiece.extension") {
+                model.newQuickChat(extensionPaths: [item.path])
+            }
+        }
     }
 }
 
@@ -45,59 +93,6 @@ private struct InboxToggleButton: View {
         }
         .buttonStyle(TitlebarIconButtonStyle(active: visible))
         .help(visible ? "Hide open chats (⌘S)" : "Show open chats (⌘S)")
-    }
-}
-
-/// The open chat's icon and title, centered in the bar.
-private struct CastTitle: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        if let controller = model.selectedController {
-            ControllerTitle(controller: controller)
-        } else if let chatID = model.selectedHermesChatID, let chat = model.inboxHermesChat(for: "hermes:\(chatID)") {
-            TitleLabel(icon: model.chatIcon(for: chat), title: chat.title)
-        }
-    }
-
-    private struct ControllerTitle: View {
-        @EnvironmentObject private var model: AppModel
-        @ObservedObject var controller: SessionController
-        var body: some View {
-            TitleLabel(
-                icon: model.chatIcon(for: controller),
-                title: controller.title.isEmpty ? (controller.isQuickChat ? "Quick chat" : "Untitled") : controller.title
-            )
-        }
-    }
-
-    private struct TitleLabel: View {
-        @Environment(\.appTheme) private var appTheme
-        let icon: ChatIcon
-        let title: String
-        var body: some View {
-            HStack(spacing: 8) {
-                ChatIconView(icon: icon, size: 18)
-                Text(title)
-                    .font(AppFonts.ui(13, weight: .semibold))
-                    .foregroundStyle(appTheme.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .allowsHitTesting(false)
-        }
-    }
-}
-
-private struct WidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
-}
-
-private extension View {
-    func measureWidth(_ update: @escaping (CGFloat) -> Void) -> some View {
-        background(GeometryReader { Color.clear.preference(key: WidthKey.self, value: $0.size.width) })
-            .onPreferenceChange(WidthKey.self, perform: update)
     }
 }
 
@@ -315,6 +310,17 @@ extension AppModel {
             selectController(controller)
         } else if let summary = inboxSummary(for: itemID) {
             selectSession(summary)
+        }
+    }
+
+    /// New chat in the current agent or project, falling back to a quick chat.
+    func startNewChat() {
+        if let agent = selectedAgent {
+            selectAgent(agent.id)
+        } else if let path = selectedProject?.path {
+            showNewChatHome(projectPath: path)
+        } else {
+            showNewChatHome(quickChat: true)
         }
     }
 

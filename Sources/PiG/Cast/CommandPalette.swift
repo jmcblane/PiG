@@ -121,7 +121,10 @@ struct CommandPalette: View {
         }
         .onAppear {
             scope = initialScope
-            fieldFocused = true
+            // The composer is an AppKit text view; SwiftUI focus won't take first
+            // responder from it, so clear it first and focus on the next pass.
+            NSApp.keyWindow?.makeFirstResponder(nil)
+            DispatchQueue.main.async { fieldFocused = true }
             sessionCache = buildSessionItems()
             if model.sessionArchiveLoadState == .idle { model.loadSessionArchive() }
             // The text field consumes Delete before SwiftUI key handlers see it.
