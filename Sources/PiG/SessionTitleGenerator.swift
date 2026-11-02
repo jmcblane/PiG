@@ -23,7 +23,15 @@ enum SessionTitleGenerator {
 
 
     static func userPrompt(from initialPrompt: String) -> String {
-        "Create a title for this initial prompt:\n\n<initial-prompt>\n\(initialPrompt)\n</initial-prompt>\n"
+        "Create a title for this session text:\n\n<session-text>\n\(initialPrompt)\n</session-text>\n"
+    }
+
+    static func openingConversation(from messages: [ChatMessage]) -> String {
+        messages.lazy
+            .filter { ($0.role == .user || $0.role == .assistant) && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .prefix(6)
+            .map { "\($0.role.rawValue): \(String($0.text.prefix(1500)))" }
+            .joined(separator: "\n\n")
     }
 
     static func generate(from initialPrompt: String, modelID: String, thinkingLevel: String) async -> String? {

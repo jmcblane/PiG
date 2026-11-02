@@ -389,6 +389,7 @@ struct QuickChatContextMenu: View {
         if controller.sessionPath != nil {
             Button("Rename…", systemImage: "pencil") { model.requestSessionRename(controller) }
                 .disabled(controller.showsActivityIndicator)
+            RegenerateSessionTitleButton(path: controller.sessionPath, working: controller.showsActivityIndicator)
         }
         Button("Close Quick Chat") { model.closeQuickChat(controller) }
             .disabled(controller.showsActivityIndicator)
@@ -406,6 +407,7 @@ struct ControllerSessionContextMenu: View {
         Button("Rename…", systemImage: "pencil") { model.requestSessionRename(controller) }
             .disabled(controller.sessionPath == nil || controller.showsActivityIndicator)
             .help(controller.sessionPath == nil ? "Save this session before renaming it." : "Rename session")
+        RegenerateSessionTitleButton(path: controller.sessionPath, working: controller.showsActivityIndicator)
         Button("Reconnect") { model.reconnect(controller) }
             .disabled(controller.isProcessActive)
         Button("Reload Session Runtime") { model.reloadSessionRuntime(controller) }
@@ -434,6 +436,7 @@ struct SessionSummaryContextMenu: View {
         Button("Open") { model.selectSession(summary) }
         Button("Rename…", systemImage: "pencil") { model.requestSessionRename(summary) }
             .disabled(model.activeController(forSessionPath: summary.filePath) != nil)
+        RegenerateSessionTitleButton(path: summary.filePath, working: model.activeController(forSessionPath: summary.filePath) != nil)
         Button("Reconnect") { model.reconnectSession(summary) }
         Button("Reload Session Runtime") { model.reloadSessionRuntime(path: summary.filePath) }
             .disabled(!model.canReloadSessionRuntime(loadedController))
@@ -446,6 +449,21 @@ struct SessionSummaryContextMenu: View {
         Divider()
         Button("Move to Trash…", role: .destructive) { model.requestSessionDeletion(summary) }
             .disabled(model.activeController(forSessionPath: summary.filePath) != nil)
+    }
+}
+
+private struct RegenerateSessionTitleButton: View {
+    @EnvironmentObject private var model: AppModel
+    let path: String?
+    let working: Bool
+
+    var body: some View {
+        let generating = path.map { model.sessionsGeneratingTitles.contains($0) } ?? false
+        Button(generating ? "Generating Title…" : "Rename with AI", systemImage: "sparkles") {
+            if let path { model.regenerateSessionTitle(path: path) }
+        }
+        .disabled(path == nil || working || generating)
+        .help("Generate a new title from the first few conversation turns using the naming model settings.")
     }
 }
 

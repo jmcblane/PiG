@@ -141,6 +141,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var sessionNamingModels: [ModelInfo] = []
     @Published private(set) var modelCatalogLoadState: ModelCatalogLoadState = .loading
     @Published var statusLine: String = ""
+    @Published private(set) var sessionsGeneratingTitles: Set<String> = []
     @Published var usageLimits: [UsageLimitProvider: UsageLimitSnapshot] = [:]
     @Published var customActionsByProject: [String: ProjectCustomActions] = [:]
     @Published private(set) var sessionLaunchExtensions: [PiResourceItem] = []
@@ -1086,6 +1087,47 @@ final class AppModel: ObservableObject {
     func requestSessionRename(_ summary: SessionSummary) {
         guard activeController(forSessionPath: summary.filePath) == nil else { return }
         sessionPendingRename = SessionRenameRequest(filePath: summary.filePath, title: summary.title)
+    }
+
+    func regenerateSessionTitle(path: String) {
+        guard activeController(forSessionPath: path) == nil,
+              !sessionsGeneratingTitles.contains(path) else { return }
+        sessionsGeneratingTitles.insert(path)
+        let controller = controller(forSessionPath: path)
+        let mode = sessionNamingModelMode
+        let modelID = mode == .specific ? sessionNamingModelID
+            : (controller?.selectedModelID.nonEmptyTrimmed ?? DefaultModelSchedule.effectiveModelID() ?? "")
+        let thinkingLevel = sessionNamingThinkingLevel
+        statusLine = "Generating session title…"
+        Task {
+            defer { sessionsGeneratingTitles.remove(path) }
+            guard let parsed = await SessionParser.parseFileAsync(URL(fileURLWithPath: path)) else {
+                statusLine = "Could not read session for title generation."
+                return
+            }
+            let conversation = SessionTitleGenerator.openingConversation(from: parsed.messages)
+            guard !conversation.isEmpty else {
+                statusLine = "No conversation available to generate a title."
+                return
+            }
+            var title: String?
+            if mode != .apple {
+                title = await SessionTitleGenerator.generate(from: conversation, modelID: modelID, thinkingLevel: thinkingLevel)
+            }
+            if title == nil {
+                title = await AppleIntelligenceNaming.generateTitle(from: conversation)
+            }
+            guard let title else {
+                statusLine = "Could not generate session title. Check the naming model settings."
+                return
+            }
+            guard let current = await SessionParser.parseFileAsync(URL(fileURLWithPath: path)),
+                  current.summary.title == parsed.summary.title else {
+                statusLine = "Session changed while generating its title; title not replaced."
+                return
+            }
+            renameSession(SessionRenameRequest(filePath: path, title: current.summary.title), to: title)
+        }
     }
 
     func renameSession(_ request: SessionRenameRequest, to rawName: String) {
