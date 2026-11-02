@@ -6,7 +6,7 @@
 </p>
 <p>
   <img src="images/pig-split-terminal.png" alt="PiG chat with split terminal" width="49%">
-  <img src="images/pig-fullscreen-terminal.png" alt="PiG fullscreen terminal" width="49%">
+  <img src="images/pig-command-palette.png" alt="PiG command palette for chats, agents, and projects" width="49%">
 </p>
 
 PiG is a SwiftUI macOS GUI for the `pi` coding agent.
@@ -21,11 +21,12 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 ### Projects & sessions
 
 - Open chats in a list on the left with a pixel folder per project (or the agent's face), title, and status; swipe to mark done, drag to reorder, ⌘S to hide
-- ⌘K palette for open chats, all sessions (including the archive), agents, projects, files, models, and actions
+- Collapse the open-chats list to an icon rail for more room
+- ⌘K palette for open chats, all sessions (including the archive), agents, projects, files, models, and actions; use ↑/↓ or Ctrl-P/Ctrl-N to move through results
 - Project files in a popover from the top bar
 - Project home page listing recent sessions
 - Quick Chats: throwaway chats that don't belong to a project
-- Session names generated automatically (by the session's model, a model you pick, or Apple Intelligence on the Mac)
+- Session names generated automatically (by the session's model, a model you pick, or Apple Intelligence on the Mac); “Rename with AI” generates a new title from the opening conversation turns
 - Session tree view: jump to any earlier point in a conversation and fork a new session from a prompt
 - Search across all sessions, including archived ones (⌘F)
 - Several sessions can run at once; idle ones can be unloaded or reloaded
@@ -41,6 +42,7 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 
 - Markdown rendering with syntax-highlighted code previews
 - Tool activity groups that expand to show commands and file reads
+- Background jobs stay visible while running, with results linked back to the tool call
 - Detailed views of subagent runs
 - Optional display of the model's thinking traces
 - Attach images by pasting or dragging
@@ -81,11 +83,11 @@ the chat.
 
 - File tree: create, rename and trash files; reveal in Finder; open in Terminal; copy paths and references
 - Custom actions: a button in the title bar that runs your saved shell commands for the project, with output shown in the chat
-- Built-in terminal ([SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)): fullscreen (⌘⇧F), vertical split (⌘D) or horizontal split (⌘⇧D), with tabs; opens in the session's project folder
+- Built-in terminal ([SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)): [fullscreen](images/pig-fullscreen-terminal.png) (⌘⇧F), vertical split (⌘D) or horizontal split (⌘⇧D), with tabs; opens in the session's project folder
 
 ### Appearance
 
-- Themes including Dusk (the default), Glow versions of Finder Blue, Nord, Tokyo Night Storm and Rosé Pine, Nord, Dracula, Tokyo Night, Rosé Pine and GitHub Light
+- Themes including Dusk (the default), Finder Blue, Nord, Dracula, Tokyo Night Storm, Rosé Pine and GitHub Light; Glow versions of Finder Blue, Nord, Tokyo Night Storm and Rosé Pine
 - Adjustable text size (⌘+ / ⌘−)
 - Native SwiftUI app for macOS 14+
 
@@ -105,5 +107,17 @@ open dist/PiG.app
 Requires macOS 14+ and a Swift toolchain. Add `--clean` for a clean build; optional signing settings are documented in `scripts/build-app.local.env.example`.
 
 If PiG can't find `pi`, set its path in Settings → General.
+
+For a separate demo app with fake projects, chats, and an agent:
+
+```sh
+scripts/build-demo.sh
+open .demo/PiG.app
+```
+
+The demo uses its own app preferences and data in `.demo/` (gitignored), without
+copying credentials or reading your chat history. Rebuilds preserve demo data;
+quit the demo and move `.demo/home` to the Trash to seed fresh chats next time.
+Requires Python 3 in addition to the build requirements above.
 
 Third-party licenses are in `THIRD_PARTY_NOTICES.md`.

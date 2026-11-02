@@ -3,6 +3,7 @@
 .swiftpm/
 DerivedData/
 dist/
+.demo/
 *.xcuserdata
 archive/
 .claude/settings.local.json

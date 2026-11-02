@@ -32,9 +32,10 @@ CLEAN=0
 CREATE_LOCAL_IDENTITY="${PIG_CREATE_LOCAL_IDENTITY-0}"
 SIGN_ID="${PIG_SIGN_ID--}"
 KEYCHAIN="${PIG_SIGN_KEYCHAIN-$HOME/Library/Keychains/login.keychain-db}"
-DIST_DIR="$ROOT_DIR/dist"
+DIST_DIR="${PIG_DIST_DIR-$ROOT_DIR/dist}"
+BUILD_DIR="${PIG_BUILD_DIR-$ROOT_DIR/.build}"
 APP="$DIST_DIR/$APP_NAME.app"
-EXECUTABLE="$ROOT_DIR/.build/$CONFIG/$APP_NAME"
+EXECUTABLE="$BUILD_DIR/$CONFIG/$APP_NAME"
 ICON="$ROOT_DIR/Resources/AppIcon.icns"
 
 for arg in "$@"; do
@@ -116,13 +117,13 @@ cd "$ROOT_DIR"
 
 if [[ "$CLEAN" == "1" ]]; then
   echo "Cleaning SwiftPM build artifacts…"
-  swift package clean
+  swift package --scratch-path "$BUILD_DIR" clean
 fi
 
 echo "Building $APP_NAME ($CONFIG)…"
 # Native keeps the binary at .build/$CONFIG and skips compiling SwiftTerm's
 # Metal shaders, which needs Xcode's separately installed Metal Toolchain.
-swift build -c "$CONFIG" --build-system native
+swift build -c "$CONFIG" --build-system native --scratch-path "$BUILD_DIR"
 
 echo "Creating app bundle: $APP"
 rm -rf "$APP"
