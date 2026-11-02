@@ -37,7 +37,6 @@ enum ChatIcon: Hashable {
 }
 
 struct ChatIconView: View {
-    @Environment(\.appTheme) private var appTheme
     let icon: ChatIcon
     var size: CGFloat = 26
 
@@ -46,20 +45,16 @@ struct ChatIconView: View {
         case .agent(let look):
             AgentAvatar(look: look, size: size)
         case .project(let color):
-            tile(PixelSprite(rows: Self.folder, palette: Self.folderPalette(color)), tint: color)
+            tile(PixelSprite(rows: Self.folder, palette: Self.folderPalette(color)))
         case .quickChat:
-            tile(PixelSprite(rows: Self.bolt, palette: Self.boltPalette), tint: ChatIcon.quickChatColor)
+            tile(PixelSprite(rows: Self.bolt, palette: Self.boltPalette))
         }
     }
 
-    private func tile(_ sprite: PixelSprite, tint: String) -> some View {
-        let shape = RoundedRectangle(cornerRadius: max(3, size * 0.22), style: .continuous)
-        return sprite
-            .padding(size * 0.14)
+    private func tile(_ sprite: PixelSprite) -> some View {
+        sprite
+            .padding(size * 0.06)
             .frame(width: size, height: size)
-            .background(Color(lookHex: tint).opacity(0.18))
-            .clipShape(shape)
-            .overlay(shape.strokeBorder(appTheme.line, lineWidth: 1))
             .accessibilityHidden(true)
     }
 

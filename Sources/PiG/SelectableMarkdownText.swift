@@ -571,11 +571,12 @@ final class MarkdownTextView: NSTextView {
     // Measured through this view's own layout manager, so the layout the
     // measurement produces is the same one used to draw. Measuring on a
     // separate TextKit stack would lay every message out twice per frame.
-    func measuredHeight(forWidth width: CGFloat) -> CGFloat {
-        guard let layoutManager, let textContainer else { return 0 }
+    func measuredSize(forWidth width: CGFloat) -> CGSize {
+        guard let layoutManager, let textContainer else { return .zero }
         textContainer.size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
         layoutManager.ensureLayout(for: textContainer)
-        return ceil(layoutManager.usedRect(for: textContainer).height)
+        let used = layoutManager.usedRect(for: textContainer)
+        return CGSize(width: min(width, ceil(used.width)), height: ceil(used.height))
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -622,6 +623,9 @@ final class MarkdownTextView: NSTextView {
 
 struct SelectableMarkdownText: NSViewRepresentable {
     let text: MarkdownAttributedText
+    /// Report the laid-out line width instead of the full proposed width,
+    /// so a short message can size its container (the user bubble) to fit.
+    var hugsWidth = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -641,12 +645,9 @@ struct SelectableMarkdownText: NSViewRepresentable {
         // storage it will be drawn from, and this removes any dependence on
         // SwiftUI calling updateNSView before sizeThatFits.
         apply(to: nsView, coordinator: context.coordinator)
-        if let cached = context.coordinator.heightForWidth[width] {
-            return CGSize(width: width, height: cached)
-        }
-        let height = nsView.measuredHeight(forWidth: width)
-        context.coordinator.heightForWidth[width] = height
-        return CGSize(width: width, height: height)
+        let size = context.coordinator.sizeForWidth[width] ?? nsView.measuredSize(forWidth: width)
+        context.coordinator.sizeForWidth[width] = size
+        return CGSize(width: hugsWidth ? size.width : width, height: size.height)
     }
 
     // Streaming appends to a message, so replacing the whole text storage
@@ -657,7 +658,7 @@ struct SelectableMarkdownText: NSViewRepresentable {
         guard coordinator.text?.attributed !== text.attributed else { return }
         let previous = coordinator.text
         coordinator.text = text
-        coordinator.heightForWidth.removeAll()
+        coordinator.sizeForWidth.removeAll()
         guard let storage = view.textStorage else { return }
 
         guard let previous,
@@ -689,6 +690,6 @@ struct SelectableMarkdownText: NSViewRepresentable {
 
     final class Coordinator {
         var text: MarkdownAttributedText?
-        var heightForWidth: [CGFloat: CGFloat] = [:]
+        var sizeForWidth: [CGFloat: CGSize] = [:]
     }
 }

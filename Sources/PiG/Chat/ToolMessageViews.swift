@@ -287,35 +287,86 @@ struct BackgroundJobResultView: View {
     let projectPath: String?
     let isHighlighted: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expandedJobs: Set<String> = []
+
     var body: some View {
-        HStack(alignment: .top, spacing: 9) {
-            Image(systemName: "arrow.uturn.backward")
-                .font(AppFonts.ui(12, weight: .semibold))
-                .foregroundStyle(appTheme.brass)
-                .frame(width: 14, height: 26)
-                .accessibilityLabel("Background job finished")
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(message.tools) { tool in
-                    ToolRow(tool: tool, projectPath: projectPath)
-                        .padding(.vertical, 2)
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(message.tools) { tool in
+                divider(for: tool)
+                if expandedJobs.contains(tool.id) {
+                    ToolRow(tool: tool, projectPath: projectPath, startsExpanded: true)
+                        .padding(.leading, 36)
+                        .padding(.trailing, 18)
+                        .transition(.opacity)
                 }
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 8)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [appTheme.brass.opacity(isHighlighted ? 0.24 : 0.10), appTheme.brass.opacity(0)],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-        )
-        .overlay(alignment: .leading) {
-            Rectangle().fill(appTheme.brass).frame(width: 2)
+        // Arriving from the launching row's "Show result" means the output is wanted.
+        .onChange(of: isHighlighted) { _, highlighted in
+            if highlighted { expandedJobs.formUnion(message.tools.map(\.id)) }
         }
-        .padding(.top, 8)
+    }
+
+    /// A centered pill on a hairline: an event that starts a turn, not a message.
+    private func divider(for tool: ToolDisplay) -> some View {
+        let failed = tool.status == .failed || tool.isError
+        let expanded = expandedJobs.contains(tool.id)
+        let jobID = tool.backgroundJob?.id ?? 0
+        return HStack(spacing: 10) {
+            hairline
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.12)) {
+                    if expanded { expandedJobs.remove(tool.id) } else { expandedJobs.insert(tool.id) }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(failed ? appTheme.danger : appTheme.good)
+                        .frame(width: 7, height: 7)
+                    Text(jobID > 0 ? "Job \(jobID) \(failed ? "failed" : "finished")" : (failed ? "Job failed" : "Job finished"))
+                        .font(AppFonts.ui(12, weight: .medium))
+                        .foregroundStyle(appTheme.secondaryText)
+                    Text(tool.displayTitle)
+                        .font(AppFonts.code(12))
+                        .foregroundStyle(appTheme.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let duration = tool.backgroundJob?.duration {
+                        Text(TurnTiming.format(duration))
+                            .font(AppFonts.code(11.5))
+                            .monospacedDigit()
+                            .foregroundStyle(appTheme.muted)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(AppFonts.ui(9, weight: .bold))
+                        .foregroundStyle(appTheme.muted)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                }
+                .padding(.horizontal, 11)
+                .frame(height: 24)
+                .background(Capsule().fill(isHighlighted ? appTheme.brass.opacity(0.16) : appTheme.panel))
+                .overlay(Capsule().stroke(isHighlighted ? appTheme.brass : appTheme.line, lineWidth: 1))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .layoutPriority(1)
+            .help(expanded ? "Hide output" : "Show output")
+            .accessibilityLabel("Background job \(jobID) \(failed ? "failed" : "finished"), \(tool.displayTitle)")
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            hairline
+        }
+        .padding(.horizontal, 18)
         .animation(.easeOut(duration: 0.22), value: isHighlighted)
+    }
+
+    private var hairline: some View {
+        Rectangle()
+            .fill(appTheme.line)
+            .frame(minWidth: 16, maxWidth: .infinity)
+            .frame(height: 1)
     }
 }
 
@@ -420,11 +471,13 @@ struct ToolRow: View {
     @State private var showingCommand = false
     @State private var hovering = false
 
-    init(tool: ToolDisplay, projectPath: String?) {
+    init(tool: ToolDisplay, projectPath: String?, startsExpanded: Bool = false) {
         self.tool = tool
         self.projectPath = projectPath
+        let cycles = tool.userLabel != nil || (tool.backgroundJob != nil && tool.shortName == "bash")
         // Background jobs keep to one line until opened.
-        let initial: ToolExpansion = tool.backgroundJob != nil ? .collapsed
+        let initial: ToolExpansion = startsExpanded ? (cycles ? .partial : .full)
+            : tool.backgroundJob != nil ? .collapsed
             : tool.userLabel != nil ? .partial
             : Self.isSubagent(tool) && tool.status == .running ? .full : .collapsed
         _expansion = State(initialValue: initial)

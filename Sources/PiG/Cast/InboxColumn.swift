@@ -6,20 +6,17 @@ import UniformTypeIdentifiers
 /// marks a chat done, drag reorders, and sub-chats sit under their parent.
 struct InboxColumn: View {
     static let width: CGFloat = 280
+    static let railWidth: CGFloat = 64
+    /// True docks the full column; false shows the collapsed `InboxRail`.
     static let visibilityKey = "PiG.inbox.visible"
 
     @Environment(\.appTheme) private var appTheme
+    @Environment(\.inboxCompact) private var compact
     @EnvironmentObject private var model: AppModel
     @State private var draggingItemID: String?
     @State private var dropTargetID: String?
     @State private var dropAfter = false
     @State private var revealedItemID: String?
-
-    /// Slightly darker than the window so the chat column reads as the focus.
-    static func background(_ theme: AppTheme) -> Color {
-        let c = theme.palette.background, f = theme.choice.isLight ? 0.96 : 0.86
-        return Color(red: c.red * f, green: c.green * f, blue: c.blue * f)
-    }
 
     private var resolvedIDs: [String] { model.sessionInboxIDs.filter(model.isInboxItemResolvable) }
 
@@ -55,14 +52,11 @@ struct InboxColumn: View {
                 .padding(.top, 6)
                 .padding(.bottom, 8)
             }
-            .scrollIndicators(.automatic)
-            footer
+            .scrollIndicators(compact ? .never : .automatic)
+            if !compact { footer }
         }
+        // Always laid out at full width; the rail clips it, so text never rewraps.
         .frame(width: Self.width)
-        .background(Self.background(appTheme))
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(Color.white.opacity(appTheme.choice.isLight ? 0 : 0.05)).frame(width: 1)
-        }
     }
 
     private func row(_ itemID: String, isChild: Bool) -> some View {
@@ -115,12 +109,159 @@ struct InboxColumn: View {
     }
 }
 
+extension EnvironmentValues {
+    /// Draws open chats as icons with status badges and no text.
+    @Entry var inboxCompact = false
+}
+
+/// Collapsed open chats: icons float on the window background and expand into the
+/// full list, over the chat, after a short hover. Rows keep their positions when it
+/// expands, so the icon under the pointer does not move.
+struct InboxRail: View {
+    /// Full window size, so the backdrop copy lines up with the real one.
+    let windowSize: CGSize
+    @State private var expanded = false
+    @State private var hoverTask: Task<Void, Never>?
+
+    var body: some View {
+        InboxColumn()
+            .environment(\.inboxCompact, !expanded)
+            // Reveal the full-width layout instead of resizing it.
+            .frame(width: expanded ? InboxColumn.width : InboxColumn.railWidth, alignment: .leading)
+            .clipped()
+            .contentShape(Rectangle())
+            .background(alignment: .leading) {
+                // Always mounted: inserting and removing the AppKit blur made it pop in
+                // and out ahead of the SwiftUI fade, which read as a flash.
+                InboxOverlayBackdrop(windowSize: windowSize, visible: expanded)
+                    .frame(width: InboxColumn.width + 48)
+                    .allowsHitTesting(false)
+            }
+            .onHover { inside in
+                hoverTask?.cancel()
+                hoverTask = Task {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeOut(duration: Self.fadeDuration)) { expanded = inside }
+                }
+            }
+    }
+
+    static let fadeDuration = 0.14
+}
+
+/// Behind the expanded rail: a blur of the chat, then the window backdrop at 90%,
+/// placed so its glow lines up with the real one. It reads as the docked sidebar
+/// on the window background, with a feathered right edge.
+private struct InboxOverlayBackdrop: View {
+    let windowSize: CGSize
+    let visible: Bool
+
+    var body: some View {
+        ZStack {
+            BackdropBlur(radius: visible ? 24 : 0)
+            GeometryReader { geometry in
+                let origin = geometry.frame(in: .global).origin
+                WindowBackdrop()
+                    .frame(width: windowSize.width, height: windowSize.height)
+                    .offset(x: -origin.x, y: -origin.y)
+            }
+            .clipped()
+            .mask {
+                LinearGradient(
+                    stops: [.init(color: .black, location: 0.84), .init(color: .clear, location: 1)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            }
+            .opacity(visible ? 0.9 : 0)
+        }
+    }
+}
+
+/// Blurs what the window draws behind it, with no tint. SwiftUI materials blur
+/// behind the window instead, which is a solid fill over an opaque window.
+private struct BackdropBlur: NSViewRepresentable {
+    let radius: CGFloat
+
+    func makeNSView(context: Context) -> BackdropBlurView {
+        let view = BackdropBlurView()
+        view.setRadius(radius, animated: false)
+        return view
+    }
+
+    func updateNSView(_ view: BackdropBlurView, context: Context) {
+        view.setRadius(radius, animated: true)
+    }
+}
+
+/// Core Image background blur with a feathered right edge. The radius animates with
+/// the SwiftUI fade; radius 0 is a no-op, so turning it on cannot flash.
+private final class BackdropBlurView: NSView {
+    private static let radiusKeyPath = "backgroundFilters.blur.inputRadius"
+    private let fade = CAGradientLayer()
+    private var radius: CGFloat = -1
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layerUsesCoreImageFilters = true
+        // A background filter only renders where the layer has content.
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.001).cgColor
+        layer?.masksToBounds = true
+        if let blur = CIFilter(name: "CIGaussianBlur") {
+            blur.name = "blur"
+            backgroundFilters = [blur]
+        }
+        fade.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+        fade.locations = [0, 0.84, 1]
+        fade.startPoint = CGPoint(x: 0, y: 0.5)
+        fade.endPoint = CGPoint(x: 1, y: 0.5)
+        layer?.mask = fade
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fade.frame = bounds
+        CATransaction.commit()
+    }
+
+    func setRadius(_ target: CGFloat, animated: Bool) {
+        guard target != radius, let layer else { return }
+        let from = max(radius, 0)
+        radius = target
+        if target > 0 { isHidden = false }
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            // Skip the filter entirely while collapsed.
+            if self?.radius == 0 { self?.isHidden = true }
+        }
+        layer.setValue(target, forKeyPath: Self.radiusKeyPath)
+        if animated {
+            let animation = CABasicAnimation(keyPath: Self.radiusKeyPath)
+            animation.fromValue = from
+            animation.toValue = target
+            animation.duration = InboxRail.fadeDuration
+            animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(animation, forKey: "radius")
+        }
+        CATransaction.commit()
+    }
+}
+
 /// New chat or quick chat, shown as list rows when no chats are open.
 private struct InboxLaunchRow: View {
     enum Kind { case chat, quickChat }
 
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
+    @Environment(\.inboxCompact) private var compact
     let kind: Kind
     @State private var hovering = false
 
@@ -147,12 +288,14 @@ private struct InboxLaunchRow: View {
                         ChatIconView(icon: .quickChat, size: 30)
                     }
                 }
-                Text(kind == .chat ? "New chat" : "Quick chat")
-                    .font(AppFonts.ui(13))
-                Spacer(minLength: 0)
-                Text(kind == .chat ? "⌘N" : "⇧⌘N")
-                    .font(AppFonts.ui(11))
-                    .foregroundStyle(appTheme.muted)
+                if !compact {
+                    Text(kind == .chat ? "New chat" : "Quick chat")
+                        .font(AppFonts.ui(13))
+                    Spacer(minLength: 0)
+                    Text(kind == .chat ? "⌘N" : "⇧⌘N")
+                        .font(AppFonts.ui(11))
+                        .foregroundStyle(appTheme.muted)
+                }
             }
             .foregroundStyle(hovering || active ? appTheme.text : appTheme.secondaryText)
             .padding(.horizontal, 9)
@@ -167,6 +310,7 @@ private struct InboxLaunchRow: View {
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
         .padding(.vertical, 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contextMenu {
             if kind == .chat { NewChatMenuItems() } else { NewQuickChatMenuItems() }
         }
@@ -413,6 +557,7 @@ private struct HermesChatRow: View {
 private struct InboxSessionListRow: View {
     @Environment(\.appTheme) private var appTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.inboxCompact) private var compact
     @EnvironmentObject private var model: AppModel
     let title: String
     let projectName: String
@@ -460,6 +605,12 @@ private struct InboxSessionListRow: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // The row face is transparent, so only show Done in the revealed strip.
+                // Masking keeps it laid out at full width, so the label never rewraps.
+                .mask(alignment: .trailing) {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .frame(width: revealAmount)
+                }
                 .disabled(working || !doneRevealed)
                 .allowsHitTesting(doneRevealed && !working)
                 .focused($doneFocused)
@@ -493,8 +644,10 @@ private struct InboxSessionListRow: View {
                 .onExitCommand(perform: closeReveal)
             }
             .background {
-                SidebarSwipeEventView { event in
-                    handleSwipe(event, rowWidth: width)
+                if !compact {
+                    SidebarSwipeEventView { event in
+                        handleSwipe(event, rowWidth: width)
+                    }
                 }
             }
         }
@@ -519,43 +672,61 @@ private struct InboxSessionListRow: View {
             ChatIconView(icon: icon, size: isChild ? 22 : 30)
                 .opacity(loaded || selected ? 1 : 0.7)
                 .saturation(loaded || selected ? 1 : 0.7)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(AppFonts.ui(13, weight: selected ? .semibold : .medium))
-                    .foregroundStyle(selected || loaded ? appTheme.text : appTheme.secondaryText)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                if !isChild {
-                    Text(projectName)
-                        .font(AppFonts.ui(11.5))
-                        .foregroundStyle(appTheme.muted)
-                        .lineLimit(1)
+                .overlay(alignment: .bottomTrailing) {
+                    if compact && hasStatus {
+                        statusIndicator
+                            .padding(3)
+                            .background(appTheme.background, in: Capsule())
+                            .offset(x: 6, y: 5)
+                    }
                 }
-            }
-            Spacer(minLength: 0)
-            Group {
-                if needsInput {
-                    InboxDot(color: appTheme.brass).help("Needs input")
-                } else if working && !selected {
-                    InboxWorkingDots().help("Working")
-                } else if finishedUnseen {
-                    InboxDot(color: appTheme.good).help("New reply")
+            if !compact {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(AppFonts.ui(13, weight: selected ? .semibold : .medium))
+                        .foregroundStyle(selected || loaded ? appTheme.text : appTheme.secondaryText)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    if !isChild {
+                        Text(projectName)
+                            .font(AppFonts.ui(11.5))
+                            .foregroundStyle(appTheme.muted)
+                            .lineLimit(1)
+                    }
                 }
+                Spacer(minLength: 0)
+                statusIndicator
+                    .frame(width: 22)
             }
-            .frame(width: 22)
         }
-        .padding(.leading, isChild ? 30 : 9)
+        // In the rail, child icons are centered rather than indented.
+        .padding(.leading, isChild ? (compact ? 13 : 30) : 9)
         .padding(.trailing, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background {
+        .background(alignment: .leading) {
+            // The row stays full width in the rail, so size the highlight to the icon.
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(selected ? appTheme.panel2 : hovering ? appTheme.panel.opacity(0.7) : InboxColumn.background(appTheme))
+                .fill(selected ? appTheme.panel2 : hovering ? appTheme.panel.opacity(0.7) : .clear)
+                .frame(width: compact ? InboxColumn.railWidth - 16 : nil)
         }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
     }
 
+    private var hasStatus: Bool { needsInput || (working && !selected) || finishedUnseen }
+
+    @ViewBuilder private var statusIndicator: some View {
+        if needsInput {
+            InboxDot(color: appTheme.brass).help("Needs input")
+        } else if working && !selected {
+            InboxWorkingDots().help("Working")
+        } else if finishedUnseen {
+            InboxDot(color: appTheme.good).help("New reply")
+        }
+    }
+
     private func revealForKeyboard() {
+        guard !compact else { return }
         guard !working else {
             model.statusLine = "A working session cannot be marked done."
             return

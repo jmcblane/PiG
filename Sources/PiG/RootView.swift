@@ -16,12 +16,19 @@ struct RootView: View {
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
                     CastBar()
-                    HStack(spacing: 0) {
-                        if inboxVisible {
-                            InboxColumn()
-                                .transition(.move(edge: .leading))
+                    ZStack(alignment: .topLeading) {
+                        HStack(spacing: 0) {
+                            if inboxVisible {
+                                InboxColumn()
+                                    .transition(.move(edge: .leading))
+                            }
+                            ChatPaneView(controller: model.selectedController)
+                                .padding(.leading, inboxVisible ? 0 : InboxColumn.railWidth)
                         }
-                        ChatPaneView(controller: model.selectedController)
+                        if !inboxVisible {
+                            InboxRail(windowSize: size)
+                                .transition(.opacity)
+                        }
                     }
                     .clipped()
                 }
@@ -106,7 +113,7 @@ struct RootView: View {
 }
 
 /// Theme background, plus the theme's glow (warm from the top, cool from the corner) if it has one.
-private struct WindowBackdrop: View {
+struct WindowBackdrop: View {
     @Environment(\.appTheme) private var appTheme
 
     var body: some View {

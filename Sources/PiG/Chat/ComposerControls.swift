@@ -10,7 +10,7 @@ struct ComposerToolbar: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
-            ModelPickerMenu(controller: controller, value: selectedModelName)
+            ModelPickerMenu(controller: controller, value: selectedModelName, provider: selectedModel?.provider)
                 .help("Model (⌘1–⌘5)")
             ThinkingDial(controller: controller)
             Spacer(minLength: 8)
@@ -108,6 +108,7 @@ struct ModelPickerMenu: View {
     @Environment(\.appTheme) private var appTheme
     @ObservedObject var controller: SessionController
     let value: String
+    var provider: String?
     @State private var isOpen = false
     @State private var hovering = false
     @State private var pinnedIDs: [String] = PinnedModels.ids
@@ -132,7 +133,7 @@ struct ModelPickerMenu: View {
                 DispatchQueue.main.async { searchFocused = true }
             }
         } label: {
-            TabStripPickerLabel(value: value, hovering: hovering)
+            TabStripPickerLabel(value: value, hovering: hovering, provider: provider)
         }
         .buttonStyle(.plain)
         .background(hovering ? Color.white.opacity(0.03) : Color.clear)
@@ -239,15 +240,39 @@ struct TabStripPickerLabel: View {
     @Environment(\.appTheme) private var appTheme
     let value: String
     let hovering: Bool
+    /// When set, shows a provider color dot and reveals the provider name on hover.
+    var provider: String?
 
     var body: some View {
-        Text(value)
+        HStack(spacing: 6) {
+            if let provider {
+                Circle()
+                    .fill(Self.color(for: provider))
+                    .frame(width: 7, height: 7)
+            }
+            HStack(spacing: 0) {
+                if hovering, let provider {
+                    Text("\(provider) / ")
+                        .foregroundStyle(appTheme.muted)
+                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                }
+                Text(value)
+                    .foregroundStyle(hovering ? appTheme.text : appTheme.secondaryText)
+            }
             .font(AppFonts.ui(11.5, weight: .medium))
-            .foregroundStyle(hovering ? appTheme.text : appTheme.secondaryText)
             .lineLimit(1)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
+            .clipped()
+        }
+        .animation(.easeOut(duration: 0.18), value: hovering)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+    }
+
+    /// Stable per-provider hue. `hashValue` is seeded per launch, so hash the scalars directly.
+    static func color(for provider: String) -> Color {
+        let hash = provider.unicodeScalars.reduce(UInt32(2166136261)) { ($0 ^ $1.value) &* 16777619 }
+        return Color(hue: Double(hash % 360) / 360, saturation: 0.55, brightness: 0.85)
     }
 }
 

@@ -92,7 +92,7 @@ private struct InboxToggleButton: View {
             Image(systemName: "sidebar.left")
         }
         .buttonStyle(TitlebarIconButtonStyle(active: visible))
-        .help(visible ? "Hide open chats (⌘S)" : "Show open chats (⌘S)")
+        .help(visible ? "Collapse open chats (⌘S)" : "Expand open chats (⌘S)")
     }
 }
 

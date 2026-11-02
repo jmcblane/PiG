@@ -51,7 +51,7 @@ struct PiGApp: App {
                 .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(after: .toolbar) {
-                Toggle("Show Open Chats", isOn: $inboxVisible.animation(.smooth(duration: 0.22)))
+                Toggle("Expand Open Chats", isOn: $inboxVisible.animation(.smooth(duration: 0.22)))
                     .keyboardShortcut("s", modifiers: .command)
                 Button("Reopen Last Done Chat") { model.undoLastInboxDismissal() }
                     .keyboardShortcut("t", modifiers: [.command, .shift])

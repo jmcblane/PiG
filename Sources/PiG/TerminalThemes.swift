@@ -12,6 +12,7 @@ extension AppThemeChoice {
         case .nordGlow: return AppThemeChoice.nord.terminalANSIColors
         case .tokyoNightStormGlow: return AppThemeChoice.tokyoNightStorm.terminalANSIColors
         case .rosePineGlow: return AppThemeChoice.rosePine.terminalANSIColors
+        case .oxocarbonGlow: return AppThemeChoice.oxocarbonDark.terminalANSIColors
         case .dusk:
             return [0x433a58, 0xff8fae, 0x8fe3c4, 0xffd38a, 0x9ab8ff, 0xc9a5ff, 0x8fd8e3, 0xc0b6d3,
                     0x6b6085, 0xffabc2, 0xb0eed6, 0xffe2ae, 0xb8cdff, 0xdcc3ff, 0xb0e6ee, 0xf1ecf8]

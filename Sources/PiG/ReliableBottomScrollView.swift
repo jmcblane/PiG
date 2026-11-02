@@ -238,6 +238,15 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
                 cancelMessageTargeting()
                 lockToBottom = true
                 scrollToBottom()
+                // A newly swapped-in transcript (switching chats) can still report
+                // the previous document's size here, and the invalidation that
+                // corrects it lands during this measurement, where it is ignored.
+                // Measure again once layout settles instead of waiting for an
+                // unrelated invalidation such as a hover.
+                hostedContentSizeInvalidated()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                    self?.hostedContentSizeInvalidated()
+                }
                 return
             }
 

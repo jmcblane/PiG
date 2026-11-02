@@ -512,6 +512,8 @@ struct NativeMarkdownView: View {
     var textSizeStep: Int = TextSizePreference.step
     var htmlArtifacts: [String: HTMLArtifact] = [:]
     var onSendHTMLMessage: ((String) -> Void)? = nil
+    /// Size to the content rather than the proposed width (user bubbles).
+    var hugsWidth = false
 
     // Preparation is synchronous. It used to hop to a background task and
     // render a 1pt placeholder until the result arrived, which collapsed the
@@ -532,7 +534,7 @@ struct NativeMarkdownView: View {
                 segmentView(prepared.segments[index], index: index, prepared: prepared, palette: palette)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: hugsWidth ? nil : .infinity, alignment: .leading)
     }
 
     private var bodyColor: Color {
@@ -545,7 +547,7 @@ struct NativeMarkdownView: View {
         switch segment {
         case .text:
             if let text = prepared.attributedText[index] {
-                SelectableMarkdownText(text: text)
+                SelectableMarkdownText(text: text, hugsWidth: hugsWidth)
             }
         case .code(let code, let language):
             NativeCodeBlockView(code: code, language: language, theme: theme, textSizeStep: textSizeStep)

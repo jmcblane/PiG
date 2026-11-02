@@ -626,28 +626,75 @@ struct ChatMessageRow: View, Equatable {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if message.role == .user {
-                detachedReferences
-                messageText
-                messageImages
-            } else {
-                if showThinkingTraces, !message.thinking.isEmpty {
-                    NativeMarkdownView(markdown: message.thinking, role: .system, theme: theme, isStreaming: message.isStreaming, projectPath: projectPath, textSizeStep: textSizeStep)
+        if message.role == .user {
+            userBubbleRow
+        } else {
+            standardRow
+        }
+    }
+
+    /// Right-aligned bubble. Attachments sit above it, and the copy button
+    /// appears to its left so it never covers the text.
+    private var userBubbleRow: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            detachedReferences
+            if !message.images.isEmpty {
+                FlowLayout(spacing: 8, alignment: .trailing) {
+                    ForEach(message.images) { attachment in
+                        ImageAttachmentThumbnail(attachment: attachment, maxDimension: 1024, style: .message)
+                    }
                 }
-                detachedReferences
-                messageImages
-                messageText
-                if message.isStreaming && showsActivityIndicator {
-                    InlineActivityIndicator(text: activityText)
-                }
-                if let turnTiming {
-                    turnTimingFooter(turnTiming)
+            }
+            if message.canonicalText?.isEmpty == false || !message.text.isEmpty {
+                HStack(alignment: .bottom, spacing: 6) {
+                    Spacer(minLength: 72)
+                    copyButton
+                    messageText
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(appTheme.userRow)
+                        )
+                        .overlay {
+                            if isHighlighted {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .fill(appTheme.brass.opacity(0.10))
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .strokeBorder(appTheme.brass, lineWidth: 1.5)
+                                }
+                                .allowsHitTesting(false)
+                            }
+                        }
                 }
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, message.role == .user ? 18 : 16)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+    }
+
+    private var standardRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if showThinkingTraces, !message.thinking.isEmpty {
+                NativeMarkdownView(markdown: message.thinking, role: .system, theme: theme, isStreaming: message.isStreaming, projectPath: projectPath, textSizeStep: textSizeStep)
+            }
+            detachedReferences
+            messageImages
+            messageText
+            if message.isStreaming && showsActivityIndicator {
+                InlineActivityIndicator(text: activityText)
+            }
+            if let turnTiming {
+                turnTimingFooter(turnTiming)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackground)
         .overlay {
@@ -667,33 +714,35 @@ struct ChatMessageRow: View, Equatable {
         }
         .overlay(alignment: .bottomTrailing) {
             if !message.text.isEmpty || !message.references.isEmpty {
-                Button(action: copyMessage) {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(AppFonts.ui(11, weight: .semibold))
-                        .foregroundStyle(copied ? appTheme.good : appTheme.muted)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(appTheme.panel.opacity(0.94))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .stroke(appTheme.line.opacity(0.7), lineWidth: 1)
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(8)
-                .opacity(hovering || copied ? 1 : 0)
-                .allowsHitTesting(hovering || copied)
-                .animation(.easeInOut(duration: 0.12), value: hovering)
-                .help(copied ? "Copied" : "Copy message")
-                .accessibilityLabel("Copy message")
-                .accessibilityValue(copied ? "Copied" : "")
+                copyButton.padding(8)
             }
         }
         .onHover { hovering = $0 }
-        .padding(.top, message.role == .user ? 12 : 0)
+    }
+
+    private var copyButton: some View {
+        Button(action: copyMessage) {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                .font(AppFonts.ui(11, weight: .semibold))
+                .foregroundStyle(copied ? appTheme.good : appTheme.muted)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(appTheme.panel.opacity(0.94))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(appTheme.line.opacity(0.7), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(hovering || copied ? 1 : 0)
+        .allowsHitTesting(hovering || copied)
+        .animation(.easeInOut(duration: 0.12), value: hovering)
+        .help(copied ? "Copied" : "Copy message")
+        .accessibilityLabel("Copy message")
+        .accessibilityValue(copied ? "Copied" : "")
     }
 
     /// Faint duration on the latest turn; older turns show it on hover.
@@ -720,7 +769,11 @@ struct ChatMessageRow: View, Equatable {
         // Older envelopes did not retain reference positions, so only
         // those messages use the detached reference row.
         if message.canonicalText == nil, !message.references.isEmpty {
-            MessageReferencesView(references: message.references, projectPath: projectPath)
+            MessageReferencesView(
+                references: message.references,
+                projectPath: projectPath,
+                alignment: message.role == .user ? .trailing : .leading
+            )
         }
     }
 
@@ -740,14 +793,16 @@ struct ChatMessageRow: View, Equatable {
                 theme: theme,
                 isStreaming: message.isStreaming,
                 projectPath: projectPath,
-                textSizeStep: textSizeStep
+                textSizeStep: textSizeStep,
+                hugsWidth: message.role == .user
             )
         } else if !message.text.isEmpty {
             NativeMarkdownView(
                 markdown: message.text, role: message.role, theme: theme,
                 isStreaming: message.isStreaming, projectPath: projectPath, textSizeStep: textSizeStep,
                 htmlArtifacts: htmlArtifacts,
-                onSendHTMLMessage: htmlActionTarget == nil ? nil : sendHTMLMessage
+                onSendHTMLMessage: htmlActionTarget == nil ? nil : sendHTMLMessage,
+                hugsWidth: message.role == .user
             )
         }
     }
@@ -796,9 +851,10 @@ struct MessageReferencesView: View {
     @Environment(\.appTheme) private var appTheme
     let references: [MessageReference]
     let projectPath: String?
+    var alignment: HorizontalAlignment = .leading
 
     var body: some View {
-        FlowLayout(spacing: 7) {
+        FlowLayout(spacing: 7, alignment: alignment) {
             ForEach(references) { reference in
                 referenceView(reference)
             }
@@ -891,6 +947,7 @@ struct MessageReferencesView: View {
 
 private struct FlowLayout: Layout {
     var spacing: CGFloat
+    var alignment: HorizontalAlignment = .leading
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         arrange(proposal: proposal, subviews: subviews).size
@@ -907,24 +964,31 @@ private struct FlowLayout: Layout {
         let proposedWidth = proposal.width.flatMap { $0.isFinite ? $0 : nil }
         let maxWidth = proposedWidth ?? .greatestFiniteMagnitude
         var points: [CGPoint] = []
+        var lineOfPoint: [Int] = []
+        var lineWidths: [CGFloat] = []
         var x: CGFloat = 0
         var y: CGFloat = 0
         var lineHeight: CGFloat = 0
-        var maximumOccupiedWidth: CGFloat = 0
         for subview in subviews {
             let size = subview.sizeThatFits(.unspecified)
             if x > 0, x + size.width > maxWidth {
-                maximumOccupiedWidth = max(maximumOccupiedWidth, x - spacing)
+                lineWidths.append(x - spacing)
                 x = 0
                 y += lineHeight + spacing
                 lineHeight = 0
             }
             points.append(CGPoint(x: x, y: y))
+            lineOfPoint.append(lineWidths.count)
             x += size.width + spacing
             lineHeight = max(lineHeight, size.height)
         }
-        maximumOccupiedWidth = max(maximumOccupiedWidth, max(0, x - spacing))
-        let width = proposedWidth ?? maximumOccupiedWidth
+        lineWidths.append(max(0, x - spacing))
+        let width = proposedWidth ?? lineWidths.max() ?? 0
+        if alignment == .trailing {
+            for index in points.indices {
+                points[index].x += max(0, width - lineWidths[lineOfPoint[index]])
+            }
+        }
         return (CGSize(width: width, height: y + lineHeight), points)
     }
 }

@@ -22,22 +22,17 @@ private enum AgentPortraitCache {
     }
 }
 
-/// Pixel-art head on a soft tile tinted by the agent's shirt. Sized for sidebar rows
-/// (~26pt) and the title bar (~18pt).
+/// Pixel-art head with no tile behind it. Sized for sidebar rows (~26pt) and the
+/// title bar (~18pt).
 struct AgentAvatar: View {
-    @Environment(\.appTheme) private var appTheme
     let look: Look
     var size: CGFloat = 26
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: max(3, size * 0.22), style: .continuous)
         Image(decorative: AgentPortraitCache.head(look), scale: 1)
             .interpolation(.none)
             .resizable()
             .frame(width: size, height: size)
-            .background(Color(lookHex: look.shirt).opacity(0.22))
-            .clipShape(shape)
-            .overlay(shape.strokeBorder(appTheme.line, lineWidth: 1))
             .accessibilityHidden(true)
     }
 }

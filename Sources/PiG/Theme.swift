@@ -114,6 +114,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
     case finderBlueGlow = "finderBlueGlow"
     case dusk = "dusk"
     case oxocarbonDark = "oxocarbonDark"
+    case oxocarbonGlow = "oxocarbonGlow"
     case seoul256 = "seoul256"
     case nord = "nord"
     case nordGlow = "nordGlow"
@@ -139,6 +140,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
         case .finderBlueGlow: return "Finder Blue Glow"
         case .dusk: return "Dusk (Default)"
         case .oxocarbonDark: return "Oxocarbon Dark"
+        case .oxocarbonGlow: return "Oxocarbon Glow"
         case .seoul256: return "Seoul256"
         case .nord: return "Nord"
         case .nordGlow: return "Nord Glow"
@@ -172,6 +174,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
         case .nordGlow: return (palette.accent, ThemeRGB(hex: 0xb48ead))
         case .tokyoNightStormGlow: return (palette.accent, ThemeRGB(hex: 0xbb9af7))
         case .rosePineGlow: return (ThemeRGB(hex: 0xebbcba), palette.good)
+        case .oxocarbonGlow: return (palette.accent, ThemeRGB(hex: 0xbe95ff))
         default: return nil
         }
     }
@@ -362,6 +365,36 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                     quoteForeground: MarkdownColor(hex: 0x908caa),
                     link: MarkdownColor(hex: 0xebbcba),
                     tableHeaderBackground: MarkdownColor(hex: 0xc4a7e7, opacity: 0.12),
+                    evenRowBackground: MarkdownColor(hex: 0xffffff, opacity: 0.03)
+                )
+            )
+        case .oxocarbonGlow:
+            return AppThemePalette(
+                background: ThemeRGB(hex: 0x15161a),
+                panel: ThemeRGB(hex: 0x1d1e23),
+                panel2: ThemeRGB(hex: 0x27282e),
+                line: ThemeRGB(hex: 0x393a41),
+                lineBright: ThemeRGB(hex: 0x78a9ff),
+                text: ThemeRGB(hex: 0xf2f4f8),
+                secondaryText: ThemeRGB(hex: 0xdde1e6),
+                muted: ThemeRGB(hex: 0xa2a9b0),
+                accent: ThemeRGB(hex: 0x78a9ff),
+                danger: ThemeRGB(hex: 0xff7eb6),
+                good: ThemeRGB(hex: 0x42be65),
+                userRow: ThemeRGB(hex: 0x27282e),
+                codeText: ThemeRGB(hex: 0xbe95ff),
+                codeBackground: ThemeRGB(hex: 0x0f1013),
+                markdown: MarkdownThemePalette(
+                    userForeground: MarkdownColor(hex: 0xf2f4f8),
+                    assistantForeground: MarkdownColor(hex: 0xdde1e6),
+                    strong: MarkdownColor(hex: 0xf2f4f8),
+                    emphasis: MarkdownColor(hex: 0xbe95ff),
+                    deleted: MarkdownColor(hex: 0xa2a9b0),
+                    codeBackground: MarkdownColor(hex: 0xbe95ff, opacity: 0.10),
+                    codeBorder: MarkdownColor(hex: 0x78a9ff, opacity: 0.22),
+                    quoteForeground: MarkdownColor(hex: 0xa2a9b0),
+                    link: MarkdownColor(hex: 0x78a9ff),
+                    tableHeaderBackground: MarkdownColor(hex: 0x78a9ff, opacity: 0.12),
                     evenRowBackground: MarkdownColor(hex: 0xffffff, opacity: 0.03)
                 )
             )
