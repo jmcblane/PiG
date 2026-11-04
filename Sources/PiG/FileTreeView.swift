@@ -347,14 +347,11 @@ final class FileTreeModel: ObservableObject {
 
 struct FileTreeView: View {
     @Environment(\.appTheme) private var appTheme
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appModel: AppModel
     @StateObject private var model: FileTreeModel
     @FocusState private var treeFocused: Bool
     @FocusState private var filterFocused: Bool
-
-    @State private var namingAction: NamingAction?
-    @State private var namingVisible = false
-    @State private var namingText = ""
 
     enum NamingAction {
         case newFile(URL)
@@ -377,11 +374,6 @@ struct FileTreeView: View {
             tree
         }
         .task { model.start() }
-        .alert(namingTitle, isPresented: $namingVisible) {
-            TextField("Name", text: $namingText)
-            Button("Cancel", role: .cancel) { namingAction = nil }
-            Button(namingConfirmLabel) { performNaming() }
-        }
     }
 
     // MARK: Header
@@ -572,38 +564,35 @@ struct FileTreeView: View {
 
     // MARK: Naming (new file / new folder / rename)
 
+    /// The dialog draws in the main window, so close the popover first.
     private func beginNaming(_ action: NamingAction) {
-        if case .rename(let url) = action {
-            namingText = url.lastPathComponent
-        } else {
-            namingText = ""
+        let title: String
+        let initialText: String
+        switch action {
+        case .newFile: title = "New File"; initialText = ""
+        case .newFolder: title = "New Folder"; initialText = ""
+        case .rename(let url): title = "Rename \(url.lastPathComponent)"; initialText = url.lastPathComponent
         }
-        namingAction = action
-        namingVisible = true
+        let confirmTitle: String
+        if case .rename = action { confirmTitle = "Rename" } else { confirmTitle = "Create" }
+        let tree = model
+        let request = GlowDialogRequest(
+            title: title,
+            textInput: .init(placeholder: "Name", initialText: initialText, requiresText: false),
+            confirmTitle: confirmTitle,
+            onConfirm: { name in Self.performNaming(action, name: name, tree: tree) }
+        )
+        let appModel = appModel
+        dismiss()
+        DispatchQueue.main.async { appModel.dialog = request }
     }
 
-    private var namingTitle: String {
-        switch namingAction {
-        case .newFile: return "New File"
-        case .newFolder: return "New Folder"
-        case .rename(let url): return "Rename \(url.lastPathComponent)"
-        case nil: return ""
-        }
-    }
-
-    private var namingConfirmLabel: String {
-        if case .rename = namingAction { return "Rename" }
-        return "Create"
-    }
-
-    private func performNaming() {
-        let name = namingText.trimmingCharacters(in: .whitespaces)
-        guard let action = namingAction, !name.isEmpty, !name.contains("/") else {
-            namingAction = nil
+    @MainActor private static func performNaming(_ action: NamingAction, name rawName: String, tree model: FileTreeModel) {
+        let name = rawName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, !name.contains("/") else {
             NSSound.beep()
             return
         }
-        namingAction = nil
 
         Task {
             let target = await Task.detached(priority: .userInitiated) { () -> URL? in

@@ -183,6 +183,7 @@ private struct HermesModelPicker: View {
             }
             .padding(.vertical, 5)
             .frame(width: 280)
+            .glowPresentationBackground()
         }
     }
 

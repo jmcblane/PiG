@@ -16,7 +16,6 @@ struct ProjectPickerMenu: View {
     let dismiss: () -> Void
 
     @State private var searchText = ""
-    @State private var pendingRemoval: Agent?
     @State private var hoveredAgentID: String?
 
     private var menuAgents: [Agent] {
@@ -131,18 +130,25 @@ struct ProjectPickerMenu: View {
             .padding(.bottom, 5)
         }
         .frame(width: width)
-        .alert("Remove \(pendingRemoval?.name ?? "Agent")?", isPresented: Binding(
-            get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }
-        ), presenting: pendingRemoval) { agent in
-            Button("Remove", role: .destructive) { model.removeAgent(agent.id) }
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in Text("The agent will be removed. Chats are kept.") }
         .onAppear {
             searchText = ""
             if focusSearchOnAppear {
                 DispatchQueue.main.async { searchFocused = true }
             }
         }
+    }
+
+    /// The dialog draws in the main window, so close the popover first.
+    private func requestRemoval(_ agent: Agent) {
+        dismiss()
+        let model = model
+        model.dialog = GlowDialogRequest(
+            title: "Remove \(agent.name)?",
+            message: "The agent will be removed. Chats are kept.",
+            confirmTitle: "Remove",
+            role: .destructive,
+            onConfirm: { _ in model.removeAgent(agent.id) }
+        )
     }
 
     private func columnHeader(_ title: String) -> some View {
@@ -226,7 +232,7 @@ struct ProjectPickerMenu: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu {
             Button("Edit…") { dismiss(); model.requestEditAgent(agent.id) }
-            Button("Remove…", role: .destructive) { pendingRemoval = agent }
+            Button("Remove…", role: .destructive) { requestRemoval(agent) }
         }
     }
 

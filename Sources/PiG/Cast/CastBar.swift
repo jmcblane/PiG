@@ -149,6 +149,7 @@ private struct CastRoomButton: View {
                 selectQuickChat: { model.showNewChatHome(quickChat: true) },
                 dismiss: { open = false }
             )
+            .glowPresentationBackground()
         }
     }
 }
@@ -181,7 +182,7 @@ private struct CastFilesButton: View {
                 }
             }
             .frame(width: 360, height: 540)
-            .background(appTheme.panel)
+            .glowPresentationBackground()
             .environmentObject(model)
             .environment(\.appTheme, appTheme)
         }
@@ -218,6 +219,7 @@ private struct CastTrailingControls: View {
             .popover(isPresented: $model.showingPiResources, arrowEdge: .bottom) {
                 PiResourcesPopoverView()
                     .environmentObject(model)
+                    .glowPresentationBackground()
             }
             TitlebarTerminalButton()
             SessionTreeToolbarButton()

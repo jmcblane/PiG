@@ -120,26 +120,19 @@ struct PiGApp: App {
         }
 
         Settings {
-            TabView {
-                GeneralSettingsView()
-                    .tabItem { Label("General", systemImage: "gearshape") }
-                ModelsSettingsView()
-                    .tabItem { Label("Models", systemImage: "cpu") }
-                AgentsSettingsView()
-                    .tabItem { Label("Agents", systemImage: "person.2") }
-            }
-            .frame(width: 600, height: 680)
-            .environmentObject(model)
-            .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textStyle: model.textStyle))
-            .preferredColorScheme(model.selectedTheme.isLight ? .light : .dark)
-            .sheet(item: Binding(
-                get: { model.agentEditorInSettings ? model.agentEditorRequest : nil },
-                set: { model.agentEditorRequest = $0 }
-            )) { request in
-                AgentEditorView(request: request)
-                    .environmentObject(model)
-                    .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textStyle: model.textStyle))
-            }
+            SettingsWindowView()
+                .frame(width: 600, height: 680)
+                .environmentObject(model)
+                .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textStyle: model.textStyle))
+                .preferredColorScheme(model.selectedTheme.isLight ? .light : .dark)
+                .sheet(item: Binding(
+                    get: { model.agentEditorInSettings ? model.agentEditorRequest : nil },
+                    set: { model.agentEditorRequest = $0 }
+                )) { request in
+                    AgentEditorView(request: request)
+                        .environmentObject(model)
+                        .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textStyle: model.textStyle))
+                }
         }
     }
 

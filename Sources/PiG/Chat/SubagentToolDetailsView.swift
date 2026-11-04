@@ -564,6 +564,7 @@ private struct SubagentOutputRow: View {
                     .accessibilityLabel("Show command")
                     .popover(isPresented: $showingCommand, arrowEdge: .bottom) {
                         BashCommandPopover(command: command)
+                            .glowPresentationBackground()
                     }
                 }
             }

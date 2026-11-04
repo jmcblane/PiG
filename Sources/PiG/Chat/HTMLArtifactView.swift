@@ -98,7 +98,7 @@ struct HTMLArtifactView: View {
                 artifact: artifact, theme: theme, textStyle: textStyle,
                 onHeight: { measuredHeight = $0 },
                 onAction: { action in
-                    if onSendMessage != nil, pendingAction == nil { pendingAction = action }
+                    if onSendMessage != nil, pendingAction == nil { confirmSend(action) }
                 },
                 onError: { previewError = $0 }
             )
@@ -141,19 +141,26 @@ struct HTMLArtifactView: View {
             }
             .padding(18)
             .frame(width: 900, height: 650)
-            .background(appTheme.background)
+            .glowPresentationBackground()
+            .environment(\.appTheme, appTheme)
         }
-        .alert("Send message to the agent?", isPresented: Binding(
-            get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }
-        ), presenting: pendingAction) { action in
-            Button("Send") {
+    }
+
+    /// The transcript is hosted in an NSHostingView, so AppModel may not be in the
+    /// environment here; RootView picks the request up from the notification.
+    private func confirmSend(_ action: HTMLWidgetAction) {
+        pendingAction = action
+        let request = GlowDialogRequest(
+            title: "Send message to the agent?",
+            message: action.message,
+            confirmTitle: "Send",
+            onConfirm: { _ in
                 pendingAction = nil
                 onSendMessage?(action.message)
-            }
-            Button("Cancel", role: .cancel) { pendingAction = nil }
-        } message: { action in
-            Text(action.message)
-        }
+            },
+            onCancel: { pendingAction = nil }
+        )
+        NotificationCenter.default.post(name: .pigPresentDialog, object: request)
     }
 
     @ViewBuilder private var utilityMenu: some View {

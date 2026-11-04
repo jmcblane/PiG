@@ -9,6 +9,7 @@ struct PiMaintenanceHost: View {
         Color.clear.frame(width: 0, height: 0)
             .sheet(item: $controller.sheet) { _ in
                 PiMaintenanceSheetView(controller: controller, theme: theme)
+                    .glowPresentationBackground()
                     .environment(\.appTheme, appTheme)
             }
     }
@@ -34,7 +35,7 @@ private struct PiMaintenanceSheetView: View {
                 EmptyView()
             }
         }
-        .background(appTheme.background)
+        .background(GlowPanelFill())
     }
 }
 
@@ -62,9 +63,11 @@ private struct UpdatesView: View {
                 } label: {
                     Label(controller.isChecking ? "Checking…" : "Check Again", systemImage: "arrow.clockwise")
                 }
+                .buttonStyle(GlowButtonStyle(kind: .secondary))
                 .disabled(controller.isChecking)
                 Spacer()
                 Button("Close") { controller.sheet = nil }
+                    .buttonStyle(GlowButtonStyle(kind: .secondary))
                     .keyboardShortcut(.cancelAction)
             }
             .padding(18)
@@ -91,11 +94,14 @@ private struct UpdatesView: View {
                 }
             }
             .font(AppFonts.ui(13))
-            HStack(spacing: 14) {
+            HStack(spacing: 10) {
                 Button("What’s New") { controller.openChangelog() }
+                    .buttonStyle(GlowButtonStyle(kind: .secondary))
                 Button("Update Pi") { controller.requestUpdate(.pi) }
+                    .buttonStyle(GlowButtonStyle(kind: .primary))
                     .disabled(controller.isUpdating)
                 Button("Refresh Model Catalogs") { controller.requestUpdate(.models) }
+                    .buttonStyle(GlowButtonStyle(kind: .secondary))
                     .disabled(controller.isUpdating)
             }
         }
@@ -124,6 +130,7 @@ private struct UpdatesView: View {
                 }
                 .font(AppFonts.ui(13))
                 Button("Update Extensions") { controller.requestUpdate(.extensions) }
+                    .buttonStyle(GlowButtonStyle(kind: .primary))
                     .disabled(controller.isUpdating)
             }
             Text("Context: \(controller.contextName)")
@@ -177,8 +184,10 @@ private struct UpdateConfirmationView: View {
             HStack {
                 Spacer()
                 Button("Cancel") { controller.sheet = nil }
+                    .buttonStyle(GlowButtonStyle(kind: .secondary))
                     .keyboardShortcut(.cancelAction)
                 Button(action.title) { controller.runConfirmedUpdate(action) }
+                    .buttonStyle(GlowButtonStyle(kind: .primary))
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -225,6 +234,7 @@ private struct UpdateProgressView: View {
                 Spacer()
                 if !controller.isUpdating {
                     Button("Done") { controller.sheet = nil }
+                        .buttonStyle(GlowButtonStyle(kind: .primary))
                         .keyboardShortcut(.defaultAction)
                 }
             }

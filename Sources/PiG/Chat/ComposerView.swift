@@ -441,6 +441,7 @@ struct LastErrorAffordance: View {
                         }
                         .padding(14)
                         .frame(width: 380)
+                        .glowPresentationBackground()
                     }
             }
             .padding(.horizontal, 12)

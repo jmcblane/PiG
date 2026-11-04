@@ -15,6 +15,12 @@ struct AgentEditorView: View {
     @State private var stashedCustomExtensions: [String] = []
     @State private var probe: ProbeState = .idle
     @State private var discoveredModels: [String] = []
+    @FocusState private var focusedField: FocusedField?
+
+    private enum FocusedField: Hashable {
+        case port
+        case apiKey
+    }
 
     private struct SkillOption: Identifiable, Hashable {
         var id: String { path }
@@ -46,31 +52,46 @@ struct AgentEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
-            Form {
-                personaSection
-                lookSection
-                switch agent.backend {
-                case .pi:
-                    piWorkspaceSection
-                    skillsSection
-                    extensionsSection
-                case .hermes:
-                    hermesSection
-                }
+            hairline
+            ScrollView {
+                sections
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            Divider()
+            hairline
             footer
         }
         .frame(width: 580, height: 700)
-        .background(appTheme.panel)
+        .background(GlowPanelFill())
+        .glowPresentationBackground()
         .task {
             guard agent.backend == .pi else { return }
             skillCatalog = Self.scanSkills()
             await loadExtensionCatalog()
         }
+    }
+
+    private var sections: some View {
+        VStack(spacing: 18) {
+            personaSection
+            lookSection
+            switch agent.backend {
+            case .pi:
+                piWorkspaceSection
+                skillsSection
+                extensionsSection
+            case .hermes:
+                hermesSection
+            }
+        }
+        .font(AppFonts.ui(13))
+        .foregroundStyle(appTheme.text)
+    }
+
+    private var hairline: some View {
+        Rectangle()
+            .fill(appTheme.line.opacity(0.6))
+            .frame(height: 1)
     }
 
     // MARK: Header and footer
@@ -108,8 +129,10 @@ struct AgentEditorView: View {
             }
             Spacer()
             Button("Cancel") { model.agentEditorRequest = nil }
+                .buttonStyle(GlowButtonStyle(kind: .secondary))
                 .keyboardShortcut(.cancelAction)
             Button(isNew ? "Create Agent" : "Save") { save() }
+                .buttonStyle(GlowButtonStyle(kind: .primary))
                 .keyboardShortcut(.defaultAction)
                 .disabled(validationProblem != nil)
         }
@@ -144,41 +167,33 @@ struct AgentEditorView: View {
     // MARK: Persona and look
 
     private var personaSection: some View {
-        Section {
-            TextField("Name", text: $agent.name)
-            TextField("Role", text: $agent.role, prompt: Text("e.g. Code reviewer"))
-        } header: {
-            Text("Persona")
-        } footer: {
-            note("Name, role, skills, and extensions take effect on the agent’s next /reload or /new.")
+        GlowSection("Persona", footer: "Name, role, skills, and extensions take effect on the agent’s next /reload or /new.") {
+            GlowRow("Name") {
+                GlowTextField("Name", text: $agent.name)
+                    .frame(width: 320)
+            }
+            GlowRow("Role") {
+                GlowTextField("e.g. Code reviewer", text: $agent.role)
+                    .frame(width: 320)
+            }
         }
     }
 
     private var lookSection: some View {
-        Section("Look") {
-            HStack(alignment: .top, spacing: 18) {
-                VStack(spacing: 8) {
-                    AgentPortrait(look: agent.look, scale: 2)
-                    Button {
-                        agent.look = .random()
-                    } label: {
-                        Label("Shuffle", systemImage: "shuffle")
+        GlowSection("Look") {
+            GlowBlockRow {
+                HStack(alignment: .top, spacing: 18) {
+                    VStack(spacing: 8) {
+                        AgentPortrait(look: agent.look, scale: 2)
+                        Button {
+                            agent.look = .random()
+                        } label: {
+                            Label("Shuffle", systemImage: "shuffle")
+                        }
+                        .buttonStyle(GlowButtonStyle(kind: .secondary))
                     }
-                    .controlSize(.small)
+                    lookControls
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker("Hair", selection: $agent.look.hairStyle) {
-                        ForEach(Look.Hair.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
-                    }
-                    Picker("Top", selection: $agent.look.top) {
-                        ForEach(Look.Top.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
-                    }
-                    Picker("Accessory", selection: $agent.look.accessory) {
-                        ForEach(Look.Accessory.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
-                    }
-                    Toggle("Smiling", isOn: $agent.look.happy)
-                }
-                .pickerStyle(.menu)
             }
             swatches("Skin", Look.skins, $agent.look.skin)
             swatches("Hair color", Look.hairs, $agent.look.hair)
@@ -189,8 +204,34 @@ struct AgentEditorView: View {
         }
     }
 
+    private var lookControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            labeledControl("Hair") {
+                GlowDropdown(selection: $agent.look.hairStyle, options: Look.Hair.allCases, label: { $0.rawValue.capitalized })
+            }
+            labeledControl("Top") {
+                GlowSegmented(selection: $agent.look.top, options: Look.Top.allCases, label: { $0.rawValue.capitalized })
+            }
+            labeledControl("Accessory") {
+                GlowSegmented(selection: $agent.look.accessory, options: Look.Accessory.allCases, label: { $0.rawValue.capitalized })
+            }
+            Toggle(isOn: $agent.look.happy) {
+                Text("Smiling")
+            }
+            .toggleStyle(.glow)
+        }
+    }
+
+    private func labeledControl<Control: View>(_ title: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+            Spacer(minLength: 8)
+            control()
+        }
+    }
+
     private func swatches(_ label: String, _ palette: [String], _ selection: Binding<String>) -> some View {
-        LabeledContent(label) {
+        GlowRow(label) {
             HStack(spacing: 4) {
                 ForEach(palette, id: \.self) { hex in
                     let selected = selection.wrappedValue.lowercased() == hex.lowercased()
@@ -216,41 +257,46 @@ struct AgentEditorView: View {
     // MARK: Pi
 
     private var piWorkspaceSection: some View {
-        Section("Workspace") {
-            LabeledContent("Folder") {
+        GlowSection("Workspace") {
+            GlowRow("Folder") {
                 HStack(spacing: 8) {
                     Text(agent.projectPath?.abbreviatingHomeDirectory() ?? "Quick Chats (saved sessions)")
+                        .font(AppFonts.ui(12.5))
                         .foregroundStyle(agent.projectPath == nil ? appTheme.muted : appTheme.text)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(agent.projectPath ?? agent.workingDirectory)
                     Button("Choose…", action: chooseFolder)
+                        .buttonStyle(GlowButtonStyle(kind: .secondary))
                     if agent.projectPath != nil {
                         Button("Clear") { agent.projectPath = nil }
+                            .buttonStyle(GlowButtonStyle(kind: .secondary))
                             .help("Use PiG’s Quick Chats folder (chats are saved)")
                     }
                 }
             }
-            ModelSelectionControl(
-                title: "Default model",
-                selection: Binding(
-                    get: { agent.modelID ?? "" },
-                    set: { agent.modelID = $0.nonEmptyTrimmed }
-                ),
-                models: model.sessionNamingModels,
-                loadState: model.modelCatalogLoadState,
-                retry: model.reloadModelCatalog,
-                allowsEmptySelection: true,
-                emptyLabel: "PiG default",
-                clearLabel: "Use PiG default"
-            )
-            Picker("Thinking", selection: $agent.thinking) {
-                Text("PiG default").tag(String?.none)
-                ForEach(SessionController.thinkingLevels, id: \.self) { level in
-                    Text(level).tag(String?.some(level))
-                }
+            GlowBlockRow {
+                ModelSelectionControl(
+                    title: "Default model",
+                    selection: Binding(
+                        get: { agent.modelID ?? "" },
+                        set: { agent.modelID = $0.nonEmptyTrimmed }
+                    ),
+                    models: model.sessionNamingModels,
+                    loadState: model.modelCatalogLoadState,
+                    retry: model.reloadModelCatalog,
+                    allowsEmptySelection: true,
+                    emptyLabel: "PiG default",
+                    clearLabel: "Use PiG default"
+                )
             }
-            .pickerStyle(.menu)
+            GlowRow("Thinking") {
+                GlowDropdown(
+                    selection: $agent.thinking,
+                    options: [String?.none] + SessionController.thinkingLevels.map { String?.some($0) },
+                    label: { $0 ?? "PiG default" }
+                )
+            }
         }
     }
 
@@ -269,82 +315,101 @@ struct AgentEditorView: View {
     }
 
     private var skillsSection: some View {
-        Section {
+        GlowSection("Skills", footer: "Checked skills are appended to the agent’s system prompt.") {
             let catalogPaths = Set(skillCatalog.map(\.path))
             let missing = agent.skills.filter { !catalogPaths.contains($0) }
             if skillCatalog.isEmpty && missing.isEmpty {
-                Text("No skills found in \(PiPaths.agentDir.appendingPathComponent("skills").path.abbreviatingHomeDirectory()).")
-                    .foregroundStyle(appTheme.muted)
-            }
-            ForEach(skillCatalog) { skill in
-                Toggle(skill.name, isOn: membership(skill.path, in: $agent.skills))
-                    .help(skill.path)
-            }
-            ForEach(missing, id: \.self) { path in
-                missingEntry(path, detail: "SKILL.md not found") {
-                    agent.skills.removeAll { $0 == path }
+                GlowBlockRow {
+                    Text("No skills found in \(PiPaths.agentDir.appendingPathComponent("skills").path.abbreviatingHomeDirectory()).")
+                        .foregroundStyle(appTheme.muted)
                 }
             }
-        } header: {
-            Text("Skills")
-        } footer: {
-            note("Checked skills are appended to the agent’s system prompt.")
+            ForEach(skillCatalog) { skill in
+                GlowBlockRow {
+                    Toggle(isOn: membership(skill.path, in: $agent.skills)) {
+                        Text(skill.name)
+                    }
+                    .toggleStyle(.glow)
+                    .help(skill.path)
+                }
+            }
+            ForEach(missing, id: \.self) { path in
+                GlowBlockRow {
+                    missingEntry(path, detail: "SKILL.md not found") {
+                        agent.skills.removeAll { $0 == path }
+                    }
+                }
+            }
         }
     }
 
     private var extensionsSection: some View {
-        Section {
-            Picker("Extensions", selection: customExtensionsBinding) {
-                Text("pi defaults").tag(false)
-                Text("Custom: only these").tag(true)
+        GlowSection("Extensions", footer: agent.extensions == nil
+                    ? "Loads the same extensions as your other pi sessions."
+                    : "Launches with --no-extensions and loads only the checked extensions.") {
+            GlowRow("Extensions") {
+                GlowSegmented(
+                    selection: customExtensionsBinding,
+                    options: [false, true],
+                    label: { $0 ? "Custom: only these" : "pi defaults" }
+                )
             }
-            .pickerStyle(.segmented)
             if agent.extensions != nil {
-                switch extensionCatalogState {
-                case .loading:
-                    SignalMarchLoadingLabel(text: "Loading extensions…")
-                case .failed(let message):
-                    HStack {
-                        Text(message)
-                            .foregroundStyle(appTheme.muted)
-                            .lineLimit(2)
-                        Spacer()
-                        Button("Retry") { Task { await loadExtensionCatalog() } }
-                    }
-                case .loaded:
-                    if extensionCatalog.isEmpty {
-                        Text("No extensions found.")
-                            .foregroundStyle(appTheme.muted)
-                    }
-                }
+                extensionCatalogStatus
                 ForEach(extensionCatalog) { item in
-                    Toggle(isOn: membership(item.path, in: customExtensionsList)) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(item.displayName)
-                            if !item.groupLabel.isEmpty {
-                                Text(item.groupLabel)
-                                    .font(AppFonts.ui(11))
-                                    .foregroundStyle(appTheme.muted)
+                    GlowBlockRow {
+                        Toggle(isOn: membership(item.path, in: customExtensionsList)) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.displayName)
+                                if !item.groupLabel.isEmpty {
+                                    Text(item.groupLabel)
+                                        .font(AppFonts.ui(11))
+                                        .foregroundStyle(appTheme.muted)
+                                }
                             }
                         }
+                        .toggleStyle(.glow)
+                        .help(item.path)
                     }
-                    .help(item.path)
                 }
                 if extensionCatalogState != .loading {
                     let catalogPaths = Set(extensionCatalog.map(\.path))
                     ForEach((agent.extensions ?? []).filter { !catalogPaths.contains($0) }, id: \.self) { entry in
-                        missingEntry(entry, detail: "Not in the extension catalog") {
-                            agent.extensions?.removeAll { $0 == entry }
+                        GlowBlockRow {
+                            missingEntry(entry, detail: "Not in the extension catalog") {
+                                agent.extensions?.removeAll { $0 == entry }
+                            }
                         }
                     }
                 }
             }
-        } header: {
-            Text("Extensions")
-        } footer: {
-            note(agent.extensions == nil
-                 ? "Loads the same extensions as your other pi sessions."
-                 : "Launches with --no-extensions and loads only the checked extensions.")
+        }
+    }
+
+    @ViewBuilder private var extensionCatalogStatus: some View {
+        switch extensionCatalogState {
+        case .loading:
+            GlowBlockRow {
+                SignalMarchLoadingLabel(text: "Loading extensions…")
+            }
+        case .failed(let message):
+            GlowBlockRow {
+                HStack {
+                    Text(message)
+                        .foregroundStyle(appTheme.muted)
+                        .lineLimit(2)
+                    Spacer()
+                    Button("Retry") { Task { await loadExtensionCatalog() } }
+                        .buttonStyle(GlowButtonStyle(kind: .secondary))
+                }
+            }
+        case .loaded:
+            if extensionCatalog.isEmpty {
+                GlowBlockRow {
+                    Text("No extensions found.")
+                        .foregroundStyle(appTheme.muted)
+                }
+            }
         }
     }
 
@@ -396,28 +461,43 @@ struct AgentEditorView: View {
     // MARK: Hermes
 
     private var hermesSection: some View {
-        Section {
-            TextField("Host", text: hermesBinding.host, prompt: Text("SSH alias or user@host"))
-            TextField("Profile", text: hermesBinding.profile, prompt: Text("default"))
-            TextField("Port", value: hermesBinding.port, format: .number.grouping(.never), prompt: Text("8642"))
-            SecureField("API key", text: $apiKey, prompt: Text(isNew ? "API key" : "Leave blank to keep the saved key"))
-            HStack(spacing: 10) {
-                Button("Check Connection", action: checkConnection)
-                    .disabled(probe == .checking || agent.hermes?.host.nonEmptyTrimmed == nil)
-                probeStatus
-                Spacer(minLength: 0)
+        GlowSection("Hermes Connection", footer: "PiG reaches the server over an SSH tunnel. Check Connection discovers the server’s models without starting a turn.") {
+            GlowRow("Host") {
+                GlowTextField("SSH alias or user@host", text: hermesBinding.host)
+                    .frame(width: 320)
             }
-            Picker("Default model", selection: $agent.modelID) {
-                Text("Server default").tag(String?.none)
-                ForEach(hermesModelOptions, id: \.self) { id in
-                    Text(id).tag(String?.some(id))
+            GlowRow("Profile") {
+                GlowTextField("default", text: hermesBinding.profile)
+                    .frame(width: 320)
+            }
+            GlowRow("Port") {
+                fieldChrome(
+                    TextField("Port", value: hermesBinding.port, format: .number.grouping(.never), prompt: Text("8642")),
+                    .port
+                )
+            }
+            GlowRow("API key") {
+                fieldChrome(
+                    SecureField("API key", text: $apiKey, prompt: Text(isNew ? "API key" : "Leave blank to keep the saved key")),
+                    .apiKey
+                )
+            }
+            GlowBlockRow {
+                HStack(spacing: 10) {
+                    Button("Check Connection", action: checkConnection)
+                        .buttonStyle(GlowButtonStyle(kind: .secondary))
+                        .disabled(probe == .checking || agent.hermes?.host.nonEmptyTrimmed == nil)
+                    probeStatus
+                    Spacer(minLength: 0)
                 }
             }
-            .pickerStyle(.menu)
-        } header: {
-            Text("Hermes Connection")
-        } footer: {
-            note("PiG reaches the server over an SSH tunnel. Check Connection discovers the server’s models without starting a turn.")
+            GlowRow("Default model") {
+                GlowDropdown(
+                    selection: $agent.modelID,
+                    options: [String?.none] + hermesModelOptions.map { String?.some($0) },
+                    label: { $0 ?? "Server default" }
+                )
+            }
         }
         .onChange(of: agent.hermes) { _, _ in probe = .idle }
         .onChange(of: apiKey) { _, _ in probe = .idle }
@@ -469,10 +549,18 @@ struct AgentEditorView: View {
 
     // MARK: Helpers
 
-    private func note(_ text: String) -> some View {
-        Text(text)
-            .font(AppFonts.ui(11.5))
-            .foregroundStyle(appTheme.muted)
+    /// Glow field chrome for inputs `GlowTextField` doesn't cover (number and secure fields).
+    private func fieldChrome<Field: View>(_ field: Field, _ which: FocusedField) -> some View {
+        field
+            .textFieldStyle(.plain)
+            .labelsHidden()
+            .font(AppFonts.ui(13))
+            .foregroundStyle(appTheme.text)
+            .focused($focusedField, equals: which)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .glowField(focused: focusedField == which)
+            .frame(width: 320)
     }
 
     private func missingEntry(_ value: String, detail: String, remove: @escaping () -> Void) -> some View {

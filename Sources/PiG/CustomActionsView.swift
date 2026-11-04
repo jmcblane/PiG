@@ -154,6 +154,7 @@ struct CustomActionsToolbarButton: View {
         }
         .padding(.vertical, 5)
         .frame(width: 240)
+        .glowPresentationBackground()
     }
 
     private func primaryAction() {
@@ -198,6 +199,7 @@ private struct CustomActionEditor: View {
     ]
 
     @State private var action: CustomAction
+    @FocusState private var commandFocused: Bool
     let isNew: Bool
     let onSave: (CustomAction) -> Void
     let onDelete: (CustomAction) -> Void
@@ -217,34 +219,45 @@ private struct CustomActionEditor: View {
                 .font(AppFonts.heading(20, weight: .semibold))
                 .foregroundStyle(appTheme.text)
 
-            TextField("Title", text: $action.title)
-                .textFieldStyle(.roundedBorder)
-
-            Picker("Icon", selection: $action.symbolName) {
-                ForEach(Self.symbols, id: \.self) { symbol in
-                    Label(symbol, systemImage: symbol).tag(symbol)
+            GlowSection {
+                GlowRow("Title") {
+                    GlowTextField("Title", text: $action.title)
+                        .frame(width: 320)
+                }
+                GlowRow("Icon") {
+                    GlowDropdown(selection: $action.symbolName, options: Self.symbols, label: { $0 }, icon: { $0 })
                 }
             }
-            .pickerStyle(.menu)
 
-            TextEditor(text: $action.command)
-                .font(AppFonts.code(12.5))
-                .frame(width: 520, height: 150)
-                .scrollContentBackground(.hidden)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(appTheme.codeBackground.opacity(0.24)))
+            GlowSection("Command") {
+                TextEditor(text: $action.command)
+                    .font(AppFonts.code(12.5))
+                    .foregroundStyle(appTheme.text)
+                    .scrollContentBackground(.hidden)
+                    .focused($commandFocused)
+                    .padding(6)
+                    .frame(height: 150)
+                    .glowField(focused: commandFocused)
+                    .padding(10)
+            }
 
             HStack {
                 if !isNew {
                     Button("Delete", role: .destructive) { onDelete(action) }
+                        .buttonStyle(GlowButtonStyle(kind: .destructive))
                 }
                 Spacer()
                 Button("Cancel", action: onCancel)
+                    .buttonStyle(GlowButtonStyle(kind: .secondary))
                 Button("Save") { onSave(action) }
+                    .buttonStyle(GlowButtonStyle(kind: .primary))
                     .keyboardShortcut(.defaultAction)
                     .disabled(action.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || action.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+        .frame(width: 520)
         .padding(18)
-        .background(appTheme.panel)
+        .background(GlowPanelFill())
+        .glowPresentationBackground()
     }
 }

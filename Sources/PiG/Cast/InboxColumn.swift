@@ -509,7 +509,6 @@ private struct HermesChatRow: View {
     var working = false
     var loaded = false
     var needsInput = false
-    @State private var confirmingDeletion = false
 
     private var itemID: String { "hermes:\(chat.id)" }
 
@@ -537,15 +536,17 @@ private struct HermesChatRow: View {
             .disabled(working)
             Divider()
             Button("Move Local Chat to Trash…", systemImage: "trash", role: .destructive) {
-                confirmingDeletion = true
+                let model = model
+                let chatID = chat.id
+                model.dialog = GlowDialogRequest(
+                    title: "Move local Hermes chat to Trash?",
+                    message: "\"\(chat.title)\" will be removed from PiG and its local journal moved to Trash. Remote server data is unchanged.",
+                    confirmTitle: "Move to Trash",
+                    role: .destructive,
+                    onConfirm: { _ in model.deleteHermesChat(chatID) }
+                )
             }
             .disabled(working)
-        }
-        .alert("Move local Hermes chat to Trash?", isPresented: $confirmingDeletion) {
-            Button("Cancel", role: .cancel) {}
-            Button("Move to Trash", role: .destructive) { model.deleteHermesChat(chat.id) }
-        } message: {
-            Text("\"\(chat.title)\" will be removed from PiG and its local journal moved to Trash. Remote server data is unchanged.")
         }
     }
 }

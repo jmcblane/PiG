@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 struct RootView: View {
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
-    @State private var renameText = ""
     @State private var paletteScope: PaletteScope?
     @AppStorage(InboxColumn.visibilityKey) private var inboxVisible = true
 
@@ -65,29 +64,16 @@ struct RootView: View {
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
             .clipped()
-            .onChange(of: model.sessionPendingRename?.id) { _, _ in
-                renameText = model.sessionPendingRename?.title ?? ""
-            }
-            .alert("Rename Session", isPresented: Binding(
-                get: { model.sessionPendingRename != nil },
-                set: { if !$0 { model.sessionPendingRename = nil } }
-            )) {
-                TextField("Name", text: $renameText)
-                Button("Cancel", role: .cancel) { model.sessionPendingRename = nil }
-                Button("Rename") {
-                    if let request = model.sessionPendingRename {
-                        model.renameSession(request, to: renameText)
-                    }
-                    model.sessionPendingRename = nil
-                }
-                .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
+            .glowDialog($model.dialog)
         }
         .ignoresSafeArea(.container, edges: .top)
         .background { WindowBackdrop() }
         .onReceive(NotificationCenter.default.publisher(for: .pigOpenPalette)) { notification in
             let scope = (notification.object as? String).flatMap(PaletteScope.init(rawValue:)) ?? .all
             paletteScope = paletteScope == scope ? nil : scope
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pigPresentDialog)) { notification in
+            if let request = notification.object as? GlowDialogRequest { model.dialog = request }
         }
         .background(appTheme.background)
         .font(AppFonts.ui(14))
@@ -99,17 +85,12 @@ struct RootView: View {
                 .environmentObject(model)
                 .environment(\.appTheme, appTheme)
         }
-        .alert(item: $model.sessionPendingDeletion) { request in
-            Alert(
-                title: Text("Move Session to Trash?"),
-                message: Text("“\(request.title.isEmpty ? "Untitled" : request.title)” will be removed from PiG and moved to the Trash."),
-                primaryButton: .destructive(Text("Move to Trash")) {
-                    model.deleteSession(request)
-                },
-                secondaryButton: .cancel()
-            )
-        }
     }
+}
+
+extension Notification.Name {
+    /// Object: a `GlowDialogRequest`, for views that can't reach AppModel through the environment.
+    static let pigPresentDialog = Notification.Name("pigPresentDialog")
 }
 
 /// Theme background, plus the theme's glow (warm from the top, cool from the corner) if it has one.

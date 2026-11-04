@@ -41,6 +41,7 @@ struct SessionTreeToolbarButton: View {
                 SessionTreeLensView(controller: controller)
                     .environmentObject(model)
                     .environment(\.appTheme, AppTheme(choice: model.selectedTheme))
+                    .glowPresentationBackground()
             }
         }
         .onChange(of: model.selectedControllerID) { _, _ in

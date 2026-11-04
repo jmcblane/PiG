@@ -179,6 +179,7 @@ private struct ProjectLandingView: View {
                         selectQuickChat: { model.showNewChatHome(quickChat: true) },
                         dismiss: { projectMenuOpen = false }
                     )
+                    .glowPresentationBackground()
                 }
                 Text(model.composingQuickChat ? "Temporary conversation" : projectPath.abbreviatingHomeDirectory())
                     .font(AppFonts.ui(12.5))

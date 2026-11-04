@@ -62,6 +62,7 @@ struct GlowButtonStyle: ButtonStyle {
         configuration.label
             .font(AppFonts.ui(12.5, weight: .medium))
             .lineLimit(1)
+            .fixedSize()
             .padding(.horizontal, 14)
             .padding(.vertical, 6)
             .foregroundStyle(foreground)
@@ -142,6 +143,7 @@ struct GlowDialogView: View {
     let request: GlowDialogRequest
     let close: () -> Void
     @State private var text = ""
+    @State private var handled = false
     @FocusState private var fieldFocused: Bool
 
     private var confirmDisabled: Bool {
@@ -195,15 +197,19 @@ struct GlowDialogView: View {
             NSApp.keyWindow?.makeFirstResponder(nil)
             DispatchQueue.main.async { fieldFocused = true }
         }
+        // A newer request replaced this one before it was answered.
+        .onDisappear { if !handled { request.onCancel() } }
     }
 
     private func confirm() {
+        handled = true
         let value = text
         close()
         request.onConfirm(value)
     }
 
     private func cancel() {
+        handled = true
         close()
         request.onCancel()
     }

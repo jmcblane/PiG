@@ -140,6 +140,7 @@ struct ModelPickerMenu: View {
         .onHover { hovering = $0 }
         .popover(isPresented: $isOpen, arrowEdge: .top) {
             menuContent
+                .glowPresentationBackground()
         }
     }
 

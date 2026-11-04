@@ -43,6 +43,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var sessionArchiveLoadState: SessionArchiveLoadState = .idle
     @Published var sessionPendingDeletion: SessionDeletionRequest?
     @Published var sessionPendingRename: SessionRenameRequest?
+    /// Themed in-window dialog, drawn by RootView above everything else.
+    @Published var dialog: GlowDialogRequest?
     @Published var controllers: [String: SessionController] = [:]
     @Published var selectedControllerID: String?
     @Published var finishedUnseenControllerIDs: Set<String> = []
@@ -1090,12 +1092,29 @@ final class AppModel: ObservableObject {
 
     func requestSessionRename(_ controller: SessionController) {
         guard let path = controller.sessionPath, !controller.showsActivityIndicator else { return }
-        sessionPendingRename = SessionRenameRequest(filePath: path, title: controller.title)
+        presentRenameDialog(SessionRenameRequest(filePath: path, title: controller.title))
     }
 
     func requestSessionRename(_ summary: SessionSummary) {
         guard activeController(forSessionPath: summary.filePath) == nil else { return }
-        sessionPendingRename = SessionRenameRequest(filePath: summary.filePath, title: summary.title)
+        presentRenameDialog(SessionRenameRequest(filePath: summary.filePath, title: summary.title))
+    }
+
+    private func presentRenameDialog(_ request: SessionRenameRequest) {
+        sessionPendingRename = request
+        dialog = GlowDialogRequest(
+            title: "Rename Session",
+            textInput: .init(placeholder: "Name", initialText: request.title),
+            confirmTitle: "Rename",
+            onConfirm: { [weak self] name in
+                guard let self else { return }
+                if let request = self.sessionPendingRename {
+                    self.renameSession(request, to: name)
+                }
+                self.sessionPendingRename = nil
+            },
+            onCancel: { [weak self] in self?.sessionPendingRename = nil }
+        )
     }
 
     func regenerateSessionTitle(path: String) {
@@ -1264,10 +1283,19 @@ final class AppModel: ObservableObject {
             statusLine = "Cannot delete a working session. Abort or wait for it to finish."
             return
         }
-        sessionPendingDeletion = SessionDeletionRequest(
+        let request = SessionDeletionRequest(
             filePath: filePath,
             projectPath: projectPath,
             title: title
+        )
+        sessionPendingDeletion = request
+        dialog = GlowDialogRequest(
+            title: "Move Session to Trash?",
+            message: "“\(request.title.isEmpty ? "Untitled" : request.title)” will be removed from PiG and moved to the Trash.",
+            confirmTitle: "Move to Trash",
+            role: .destructive,
+            onConfirm: { [weak self] _ in self?.deleteSession(request) },
+            onCancel: { [weak self] in self?.sessionPendingDeletion = nil }
         )
     }
 

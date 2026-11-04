@@ -66,6 +66,7 @@ struct AgentLandingView: View {
                                           selectProject: { model.showNewChatHome(projectPath: $0) },
                                           selectQuickChat: { model.showNewChatHome(quickChat: true) },
                                           dismiss: { projectMenuOpen = false })
+                        .glowPresentationBackground()
                     }
                     Text(agent.role)
                         .font(AppFonts.ui(12.5))

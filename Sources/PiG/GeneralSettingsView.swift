@@ -4,6 +4,7 @@ import UserNotifications
 
 struct GeneralSettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.appTheme) private var appTheme
     @State private var piExecutablePath = PiExecutablePreference.path ?? ""
     @State private var detectedPiPath = PiPaths.detectedPiExecutable.path
     @State private var notificationsDenied = false
@@ -14,79 +15,111 @@ struct GeneralSettingsView: View {
     @AppStorage(ResponseStreamingPreference.key) private var responseStreaming = ResponseStreamingPreference.live
 
     var body: some View {
-        Form {
-            Section("Appearance") {
-                Picker("Theme", selection: $model.selectedTheme) {
-                    ForEach(AppThemeChoice.allCases) { theme in
-                        Text(theme.displayName).tag(theme)
-                    }
-                }
+        ScrollView {
+            VStack(spacing: 18) {
+                appearanceSection
+                sessionsSection
+                terminalSection
+                quickChatsSection
+                notificationsSection
+                piExecutableSection
+                extensionStatusSection
+            }
+            .padding(20)
+        }
+        .task {
+            await refreshNotificationStatus()
+            _ = await PiEnvironment.mergedAsync()
+            detectedPiPath = PiPaths.detectedPiExecutable.path
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshNotificationStatus() }
+        }
+    }
 
-                FontChoicePicker(title: "Interface font", selection: $model.interfaceFont)
-                FontChoicePicker(
-                    title: "Code font",
-                    hint: model.codeFont.displayName.localizedCaseInsensitiveContains("Nerd Font")
-                        ? nil : "Terminal prompt icons need a Nerd Font.",
-                    selection: $model.codeFont
-                )
-
-                LabeledContent("Text size") {
-                    HStack {
-                        Slider(value: textSizeBinding, in: 0...Double(TextSizePreference.steps.count - 1), step: 1)
-                            .accessibilityValue("\(textSizePercent)%")
-                        Text("\(textSizePercent)%")
-                            .monospacedDigit()
-                            .frame(width: 44, alignment: .trailing)
-                        Button("Reset") { model.textSizeStep = TextSizePreference.actualSizeStep }
-                            .disabled(model.textSizeStep == TextSizePreference.actualSizeStep)
-                    }
-                }
+    private var appearanceSection: some View {
+        GlowSection("Appearance") {
+            GlowRow("Theme") {
+                GlowDropdown(selection: $model.selectedTheme, options: AppThemeChoice.allCases, label: { $0.displayName })
             }
 
-            Section("Sessions") {
-                Picker("Runtime", selection: $model.sessionRuntimePolicy) {
-                    ForEach(SessionRuntimePolicy.allCases) { policy in
-                        Text(policy.displayName).tag(policy).help(policy.helpText)
-                    }
-                }
-                .help(model.sessionRuntimePolicy.helpText)
+            FontChoicePicker(title: "Interface font", selection: $model.interfaceFont)
+            FontChoicePicker(
+                title: "Code font",
+                hint: model.codeFont.displayName.localizedCaseInsensitiveContains("Nerd Font")
+                    ? nil : "Terminal prompt icons need a Nerd Font.",
+                selection: $model.codeFont
+            )
 
-                Picker("Response streaming", selection: $responseStreaming) {
-                    ForEach(ResponseStreamingPreference.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .help("Finished paragraphs shows each paragraph, list item, or code block once it is complete.")
-
-                Toggle("Show thinking traces", isOn: $model.showThinkingTraces)
-                Toggle("Accent composer on focus", isOn: $model.composerFocusAccent)
-                Toggle(isOn: $htmlRenderEnabled) {
-                    Text("Interactive HTML in replies")
-                    Text("Lets the agent add small interactive controls to chat. Applies to sessions started after you change it.")
+            GlowRow("Text size") {
+                HStack(spacing: 10) {
+                    Slider(value: textSizeBinding, in: 0...Double(TextSizePreference.steps.count - 1), step: 1)
+                        .tint(appTheme.brass)
+                        .frame(width: 170)
+                        .accessibilityValue("\(textSizePercent)%")
+                    Text("\(textSizePercent)%")
+                        .font(AppFonts.ui(12))
+                        .foregroundStyle(appTheme.secondaryText)
+                        .monospacedDigit()
+                        .frame(width: 44, alignment: .trailing)
+                    Button("Reset") { model.textSizeStep = TextSizePreference.actualSizeStep }
+                        .buttonStyle(GlowButtonStyle())
+                        .disabled(model.textSizeStep == TextSizePreference.actualSizeStep)
                 }
             }
+        }
+    }
 
-            Section("Terminal") {
-                Picker("Terminal button opens", selection: $terminalButtonMode) {
-                    ForEach(TerminalPaneMode.buttonChoices, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                Picker("Open in Terminal uses", selection: $openInTerminalTarget) {
-                    ForEach(OpenInTerminalTarget.allCases) { target in
-                        Text(target.displayName).tag(target)
-                    }
-                }
+    private var sessionsSection: some View {
+        GlowSection("Sessions") {
+            GlowRow("Runtime") {
+                GlowSegmented(selection: $model.sessionRuntimePolicy, options: SessionRuntimePolicy.allCases, label: { $0.displayName })
             }
+            .help(model.sessionRuntimePolicy.helpText)
 
-            Section("Quick Chats") {
-                LabeledContent("Folder") {
+            GlowRow("Response streaming") {
+                GlowSegmented(selection: $responseStreaming, options: ResponseStreamingPreference.allCases, label: { $0.displayName })
+            }
+            .help("Finished paragraphs shows each paragraph, list item, or code block once it is complete.")
+
+            SettingsToggleRow(title: "Show thinking traces", isOn: $model.showThinkingTraces)
+            SettingsToggleRow(title: "Accent composer on focus", isOn: $model.composerFocusAccent)
+            SettingsToggleRow(
+                title: "Interactive HTML in replies",
+                subtitle: "Lets the agent add small interactive controls to chat. Applies to sessions started after you change it.",
+                isOn: $htmlRenderEnabled
+            )
+        }
+    }
+
+    private var terminalSection: some View {
+        GlowSection("Terminal") {
+            GlowRow("Terminal button opens") {
+                GlowSegmented(selection: $terminalButtonMode, options: TerminalPaneMode.buttonChoices, label: { $0.displayName })
+            }
+            GlowRow("Open in Terminal uses") {
+                GlowSegmented(selection: $openInTerminalTarget, options: OpenInTerminalTarget.allCases, label: { $0.displayName })
+            }
+        }
+    }
+
+    private var quickChatsSection: some View {
+        GlowSection("Quick Chats") {
+            GlowBlockRow {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Folder")
+                        .font(AppFonts.ui(13))
+                        .foregroundStyle(appTheme.text)
                     Text(PiPaths.quickChatsProject.path)
+                        .font(AppFonts.code(12))
+                        .foregroundStyle(appTheme.secondaryText)
                         .lineLimit(2)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
                 }
-                HStack {
+            }
+            GlowBlockRow {
+                HStack(spacing: 8) {
                     Button("Choose…") { chooseQuickChatsFolder() }
                     Button("Show in Finder") {
                         let folder = PiPaths.quickChatsProject
@@ -96,14 +129,19 @@ struct GeneralSettingsView: View {
                     Button("Reset to Default") { quickChatsFolder = "" }
                         .disabled(quickChatsFolder.isEmpty)
                 }
+                .buttonStyle(GlowButtonStyle())
             }
+        }
+    }
 
-            Section("Notifications") {
-                Toggle("Enable notifications", isOn: $model.notificationsEnabled)
-                if notificationsDenied {
+    private var notificationsSection: some View {
+        GlowSection("Notifications") {
+            SettingsToggleRow(title: "Enable notifications", isOn: $model.notificationsEnabled)
+            if notificationsDenied {
+                GlowBlockRow {
                     HStack {
                         Label("Notifications are turned off for PiG in System Settings.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout)
+                            .font(AppFonts.ui(12))
                             .foregroundStyle(.orange)
                         Spacer()
                         Button("Open System Settings") {
@@ -111,53 +149,66 @@ struct GeneralSettingsView: View {
                                 NSWorkspace.shared.open(url)
                             }
                         }
+                        .buttonStyle(GlowButtonStyle())
                     }
                 }
+            }
+            GlowBlockRow {
                 Button("Send test notification in 10 seconds") {
                     model.scheduleTestNotification()
                 }
+                .buttonStyle(GlowButtonStyle())
                 .disabled(!model.notificationsEnabled)
             }
+        }
+    }
 
-            Section("Pi executable") {
-                TextField("Override path", text: $piExecutablePath, prompt: Text(detectedPiPathLabel))
-                    .onChange(of: piExecutablePath) { _, value in PiExecutablePreference.path = value }
-                HStack {
+    private var piExecutableSection: some View {
+        GlowSection("Pi executable") {
+            GlowBlockRow {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Override path")
+                        .font(AppFonts.ui(13))
+                        .foregroundStyle(appTheme.text)
+                    GlowTextField(detectedPiPathLabel, text: $piExecutablePath, monospaced: true)
+                        .onChange(of: piExecutablePath) { _, value in PiExecutablePreference.path = value }
+                }
+            }
+            GlowBlockRow {
+                HStack(spacing: 8) {
                     piExecutableStatus
                     Spacer()
                     Button("Choose…") { choosePiExecutable() }
+                        .buttonStyle(GlowButtonStyle())
                     Button("Clear") { piExecutablePath = "" }
+                        .buttonStyle(GlowButtonStyle())
                         .disabled(piExecutablePath.isEmpty)
                 }
             }
+        }
+    }
 
-            Section("Extension status items") {
-                if model.extensionStatusKeys.isEmpty {
+    private var extensionStatusSection: some View {
+        GlowSection("Extension status items") {
+            if model.extensionStatusKeys.isEmpty {
+                GlowBlockRow {
                     Text("Status items appear here after an extension in a loaded session reports one.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(model.extensionStatusKeys, id: \.self) { key in
-                        Toggle(
-                            model.extensionStatusLabel(for: key),
-                            isOn: Binding(
-                                get: { !model.hiddenExtensionStatusKeys.contains(key) },
-                                set: { visible in
-                                    model.setExtensionStatusHidden(key, hidden: !visible)
-                                }
-                            )
+                        .font(AppFonts.ui(12.5))
+                        .foregroundStyle(appTheme.muted)
+                }
+            } else {
+                ForEach(model.extensionStatusKeys, id: \.self) { key in
+                    SettingsToggleRow(
+                        title: model.extensionStatusLabel(for: key),
+                        isOn: Binding(
+                            get: { !model.hiddenExtensionStatusKeys.contains(key) },
+                            set: { visible in
+                                model.setExtensionStatusHidden(key, hidden: !visible)
+                            }
                         )
-                    }
+                    )
                 }
             }
-        }
-        .formStyle(.grouped)
-        .task {
-            await refreshNotificationStatus()
-            _ = await PiEnvironment.mergedAsync()
-            detectedPiPath = PiPaths.detectedPiExecutable.path
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { await refreshNotificationStatus() }
         }
     }
 
@@ -183,17 +234,17 @@ struct GeneralSettingsView: View {
         if let path = piExecutablePath.nonEmptyTrimmed {
             if FileManager.default.isExecutableFile(atPath: (path as NSString).expandingTildeInPath) {
                 Label("Executable found", systemImage: "checkmark.circle")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(AppFonts.ui(12))
+                    .foregroundStyle(appTheme.muted)
             } else {
                 Label("Not found or not executable", systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
+                    .font(AppFonts.ui(12))
                     .foregroundStyle(.orange)
             }
         } else {
             Label("Using auto-detected pi", systemImage: "magnifyingglass")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(AppFonts.ui(12))
+                .foregroundStyle(appTheme.muted)
         }
     }
 
@@ -234,9 +285,37 @@ struct GeneralSettingsView: View {
     }
 }
 
+/// Labeled glow switch row, with an optional muted line under the title.
+private struct SettingsToggleRow: View {
+    @Environment(\.appTheme) private var appTheme
+    let title: String
+    var subtitle: String? = nil
+    @Binding var isOn: Bool
+
+    var body: some View {
+        GlowBlockRow {
+            Toggle(isOn: $isOn) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(AppFonts.ui(13))
+                        .foregroundStyle(appTheme.text)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(AppFonts.ui(11.5))
+                            .foregroundStyle(appTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .toggleStyle(.glow)
+        }
+    }
+}
+
 /// A preset menu with an "Other…" item that opens a searchable list of
 /// installed families.
 private struct FontChoicePicker<Choice: FontChoice>: View {
+    @Environment(\.appTheme) private var appTheme
     let title: String
     var hint: String? = nil
     @Binding var selection: Choice
@@ -249,28 +328,57 @@ private struct FontChoicePicker<Choice: FontChoice>: View {
     }
 
     var body: some View {
-        Picker(selection: item) {
-            ForEach(Choice.presets, id: \.self) { choice in
-                Text(choice.displayName).tag(Item.preset(choice))
-            }
-            Divider()
-            Text(selection.customFamily ?? "Other…").tag(Item.other)
-        } label: {
-            Text(title)
-            if let hint { Text(hint) }
+        GlowRow(title, subtitle: hint) {
+            GlowDropdown(selection: item, options: Choice.presets.map(Item.preset) + [.other], label: { itemLabel($0) })
         }
 
         if showsFamilies {
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("Search", text: $search, prompt: Text("Search fonts"))
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                List(filteredFamilies, id: \.self, selection: familySelection) { family in
-                    Text(family).font(.custom(family, size: 13))
+            GlowBlockRow {
+                VStack(alignment: .leading, spacing: 6) {
+                    GlowTextField("Search fonts", text: $search)
+                    familyList
                 }
-                .listStyle(.bordered)
-                .frame(height: 150)
             }
+        }
+    }
+
+    private var familyList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(filteredFamilies, id: \.self) { family in
+                    familyRow(family)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .frame(height: 150)
+        .glowField(focused: false)
+    }
+
+    private func familyRow(_ family: String) -> some View {
+        let selected = selection.customFamily == family
+        return Button {
+            selection = .family(family)
+        } label: {
+            HStack {
+                Text(family)
+                    .font(.custom(family, size: 13))
+                    .foregroundStyle(appTheme.text)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(selected ? appTheme.brass.opacity(0.14) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func itemLabel(_ item: Item) -> String {
+        switch item {
+        case .preset(let choice): return choice.displayName
+        case .other: return selection.customFamily ?? "Other…"
         }
     }
 
@@ -292,14 +400,6 @@ private struct FontChoicePicker<Choice: FontChoice>: View {
             case .other:
                 browsing = true
             }
-        }
-    }
-
-    private var familySelection: Binding<String?> {
-        Binding {
-            selection.customFamily
-        } set: { family in
-            if let family { selection = .family(family) }
         }
     }
 }
