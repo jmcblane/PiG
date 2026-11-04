@@ -341,17 +341,46 @@ struct GlowDropdown<Value: Hashable>: View {
     let label: (Value) -> String
     var icon: ((Value) -> String?)? = nil
     @State private var open = false
+
+    var body: some View {
+        GlowDropdownButton(title: label(selection), icon: icon?(selection), open: $open)
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(options, id: \.self) { option in
+                            PopoverPickerRow(title: label(option), icon: icon?(option), isSelected: option == selection) {
+                                selection = option
+                                open = false
+                            }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                .frame(minWidth: 220, maxHeight: 340)
+                .fixedSize(horizontal: false, vertical: options.count <= 12)
+                .glowPresentationBackground()
+                .environment(\.appTheme, appTheme)
+            }
+    }
+}
+
+/// The closed state of a dropdown: current value and a chevron. Tapping toggles `open`.
+struct GlowDropdownButton: View {
+    @Environment(\.appTheme) private var appTheme
+    let title: String
+    var icon: String? = nil
+    @Binding var open: Bool
     @State private var hovering = false
 
     var body: some View {
         Button { open.toggle() } label: {
             HStack(spacing: 6) {
-                if let symbol = icon?(selection) {
-                    Image(systemName: symbol)
+                if let icon {
+                    Image(systemName: icon)
                         .font(AppFonts.ui(11))
                         .foregroundStyle(appTheme.muted)
                 }
-                Text(label(selection))
+                Text(title)
                     .font(AppFonts.ui(12))
                     .foregroundStyle(appTheme.text)
                     .lineLimit(1)
@@ -371,23 +400,6 @@ struct GlowDropdown<Value: Hashable>: View {
         .buttonStyle(.plain)
         .fixedSize()
         .onHover { hovering = $0 }
-        .popover(isPresented: $open, arrowEdge: .bottom) {
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(options, id: \.self) { option in
-                        PopoverPickerRow(title: label(option), icon: icon?(option), isSelected: option == selection) {
-                            selection = option
-                            open = false
-                        }
-                    }
-                }
-                .padding(.vertical, 6)
-            }
-            .frame(minWidth: 220, maxHeight: 340)
-            .fixedSize(horizontal: false, vertical: options.count <= 12)
-            .glowPresentationBackground()
-            .environment(\.appTheme, appTheme)
-        }
     }
 }
 

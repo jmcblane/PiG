@@ -2,6 +2,8 @@
 
 ## 1.5.1
 
+- Add interface and code font preferences with searchable font previews, plus paragraph streaming mode.
+- Apply shared glow styling to dialogs, popovers, sheets, Settings, and terminal tabs.
 - Enable held-key repeat for terminal navigation by disabling the macOS press-and-hold accent picker in PiG.
 
 ## 1.5.0

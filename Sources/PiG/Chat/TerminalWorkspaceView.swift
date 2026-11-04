@@ -211,48 +211,13 @@ private struct TerminalTabStrip: View {
     let newTab: () -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             ForEach(tabs) { tab in
-                HStack(spacing: 0) {
-                    Button(action: { selectTab(tab.id) }) {
-                        HStack(alignment: .firstTextBaseline, spacing: 5) {
-                            Text(tab.shellTitle ?? tab.name)
-                                .font(AppFonts.ui(12, weight: .semibold))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            if tab.shellTitle == nil, tab.number > 1 {
-                                // A quiet number, not "(2)": it reads as a secondary label.
-                                Text("\(tab.number)")
-                                    .font(AppFonts.ui(11, weight: .regular).monospacedDigit())
-                                    .foregroundStyle(appTheme.muted)
-                                    .layoutPriority(1)
-                            }
-                        }
-                            .padding(.leading, 10)
-                            .padding(.trailing, 6)
-                            .frame(maxWidth: 110, minHeight: 24, maxHeight: 24, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(tab.workingDirectoryPath ?? "~")
-
-                    Button(action: { closeTab(tab.id) }) {
-                        Image(systemName: "xmark")
-                            .font(AppFonts.ui(9, weight: .bold))
-                            .frame(width: 20, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(appTheme.muted)
-                }
-                .foregroundStyle(tab.id == activeTabID ? appTheme.text : appTheme.secondaryText)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(tab.id == activeTabID ? appTheme.panel : appTheme.panel.opacity(0.45))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(tab.id == activeTabID ? appTheme.brass.opacity(0.45) : appTheme.line.opacity(0.55), lineWidth: 1)
+                TerminalTabItem(
+                    tab: tab,
+                    isActive: tab.id == activeTabID,
+                    select: { selectTab(tab.id) },
+                    close: { closeTab(tab.id) }
                 )
             }
 
@@ -264,15 +229,84 @@ private struct TerminalTabStrip: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(appTheme.secondaryText)
+            .padding(.leading, 2)
 
             Spacer(minLength: 0)
         }
+        .frame(height: 32)
         .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(appTheme.panel.opacity(0.96))
+        .background {
+            // Flat bar with the theme's glow faintly tinting it, like GlowPanelFill.
+            ZStack {
+                appTheme.background
+                if let glow = appTheme.choice.glow {
+                    LinearGradient(colors: [glow.top.color.opacity(0.05), .clear], startPoint: .top, endPoint: .bottom)
+                }
+            }
+        }
         .overlay(alignment: .bottom) {
             Rectangle().fill(appTheme.line.opacity(0.7)).frame(height: 1)
         }
+    }
+}
+
+/// A flat tab; the active one gets a glowing accent rule along the strip's bottom edge.
+private struct TerminalTabItem: View {
+    @Environment(\.appTheme) private var appTheme
+    let tab: TerminalTabState
+    let isActive: Bool
+    let select: () -> Void
+    let close: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: select) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(tab.shellTitle ?? tab.name)
+                        .font(AppFonts.ui(12, weight: isActive ? .semibold : .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if tab.shellTitle == nil, tab.number > 1 {
+                        // A quiet number, not "(2)": it reads as a secondary label.
+                        Text("\(tab.number)")
+                            .font(AppFonts.ui(11, weight: .regular).monospacedDigit())
+                            .foregroundStyle(appTheme.muted)
+                            .layoutPriority(1)
+                    }
+                }
+                .padding(.leading, 12)
+                .padding(.trailing, 4)
+                .frame(maxWidth: 120, maxHeight: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(tab.workingDirectoryPath ?? "~")
+
+            Button(action: close) {
+                Image(systemName: "xmark")
+                    .font(AppFonts.ui(8.5, weight: .bold))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(appTheme.muted)
+            .opacity(isActive || hovering ? 1 : 0)
+            .padding(.trailing, 6)
+        }
+        .frame(maxHeight: .infinity)
+        .foregroundStyle(isActive ? appTheme.text : (hovering ? appTheme.secondaryText : appTheme.muted))
+        .overlay(alignment: .bottom) {
+            if isActive {
+                Capsule()
+                    .fill(appTheme.brass)
+                    .frame(height: 2)
+                    .padding(.horizontal, 8)
+                    .shadow(color: appTheme.choice.glow == nil ? .clear : appTheme.brass.opacity(0.7), radius: 5)
+            }
+        }
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
 

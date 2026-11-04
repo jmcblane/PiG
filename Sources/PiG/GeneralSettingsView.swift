@@ -312,94 +312,110 @@ private struct SettingsToggleRow: View {
     }
 }
 
-/// A preset menu with an "Other…" item that opens a searchable list of
-/// installed families.
+/// A dropdown whose popover lists the presets, then every installed family
+/// in its own face, filtered by a search field.
 private struct FontChoicePicker<Choice: FontChoice>: View {
     @Environment(\.appTheme) private var appTheme
     let title: String
     var hint: String? = nil
     @Binding var selection: Choice
-    @State private var browsing = false
+    @State private var open = false
     @State private var search = ""
-
-    private enum Item: Hashable {
-        case preset(Choice)
-        case other
-    }
 
     var body: some View {
         GlowRow(title, subtitle: hint) {
-            GlowDropdown(selection: item, options: Choice.presets.map(Item.preset) + [.other], label: { itemLabel($0) })
-        }
-
-        if showsFamilies {
-            GlowBlockRow {
-                VStack(alignment: .leading, spacing: 6) {
-                    GlowTextField("Search fonts", text: $search)
-                    familyList
+            GlowDropdownButton(title: selection.displayName, open: $open)
+                .popover(isPresented: $open, arrowEdge: .bottom) {
+                    menu
+                        .glowPresentationBackground()
+                        .environment(\.appTheme, appTheme)
                 }
-            }
+                .onChange(of: open) { _, isOpen in
+                    if isOpen { search = "" }
+                }
         }
     }
 
-    private var familyList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(filteredFamilies, id: \.self) { family in
-                    familyRow(family)
+    private var menu: some View {
+        VStack(spacing: 6) {
+            GlowTextField("Search fonts", text: $search)
+                .padding([.horizontal, .top], 8)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if !presets.isEmpty {
+                        header("Presets")
+                        ForEach(presets, id: \.self) { choice in
+                            row(choice.displayName, font: AppFonts.ui(12.5), choice: choice)
+                        }
+                    }
+                    if !families.isEmpty {
+                        header("Installed fonts")
+                        ForEach(families, id: \.self) { family in
+                            row(family, font: .custom(family, size: 12.5), choice: .family(family))
+                        }
+                    }
                 }
+                .padding(.bottom, 6)
             }
-            .padding(.vertical, 4)
         }
-        .frame(height: 150)
-        .glowField(focused: false)
+        .frame(width: 260, height: 340)
     }
 
-    private func familyRow(_ family: String) -> some View {
-        let selected = selection.customFamily == family
-        return Button {
-            selection = .family(family)
-        } label: {
-            HStack {
-                Text(family)
-                    .font(.custom(family, size: 13))
+    private func header(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(AppFonts.ui(10, weight: .semibold))
+            .tracking(0.8)
+            .foregroundStyle(appTheme.muted)
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 3)
+    }
+
+    private func row(_ title: String, font: Font, choice: Choice) -> some View {
+        FontMenuRow(title: title, font: font, isSelected: choice == selection) {
+            selection = choice
+            open = false
+        }
+    }
+
+    private var query: String { search.trimmingCharacters(in: .whitespaces) }
+
+    private var presets: [Choice] {
+        query.isEmpty ? Choice.presets : Choice.presets.filter { $0.displayName.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var families: [String] {
+        query.isEmpty ? Choice.installedFamilies : Choice.installedFamilies.filter { $0.localizedCaseInsensitiveContains(query) }
+    }
+}
+
+private struct FontMenuRow: View {
+    @Environment(\.appTheme) private var appTheme
+    let title: String
+    let font: Font
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark")
+                    .font(AppFonts.ui(10, weight: .bold))
+                    .foregroundStyle(appTheme.brass)
+                    .opacity(isSelected ? 1 : 0)
+                Text(title)
+                    .font(font)
                     .foregroundStyle(appTheme.text)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(selected ? appTheme.brass.opacity(0.14) : Color.clear)
+            .background(hovering ? appTheme.brass.opacity(0.12) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    private func itemLabel(_ item: Item) -> String {
-        switch item {
-        case .preset(let choice): return choice.displayName
-        case .other: return selection.customFamily ?? "Other…"
-        }
-    }
-
-    private var showsFamilies: Bool { browsing || selection.customFamily != nil }
-
-    private var filteredFamilies: [String] {
-        let query = search.trimmingCharacters(in: .whitespaces)
-        return query.isEmpty ? Choice.installedFamilies : Choice.installedFamilies.filter { $0.localizedCaseInsensitiveContains(query) }
-    }
-
-    private var item: Binding<Item> {
-        Binding {
-            showsFamilies ? .other : .preset(selection)
-        } set: { item in
-            switch item {
-            case .preset(let choice):
-                selection = choice
-                browsing = false
-            case .other:
-                browsing = true
-            }
-        }
+        .onHover { hovering = $0 }
     }
 }
