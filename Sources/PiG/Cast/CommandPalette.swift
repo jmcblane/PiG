@@ -113,10 +113,7 @@ struct CommandPalette: View {
                 list(results)
             }
             .frame(width: 600)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(appTheme.panel))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(appTheme.line.opacity(0.8), lineWidth: 1))
-            .shadow(color: .black.opacity(0.45), radius: 40, y: 20)
+            .glowPanel()
             .padding(.top, 72)
         }
         .onAppear {
