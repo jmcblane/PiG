@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.1
+
+- Enable held-key repeat for terminal navigation by disabling the macOS press-and-hold accent picker in PiG.
+
 ## 1.5.0
 
 - Redesign the chat layout, composer, and open-chats list, with pixel project folders, agent faces, and a collapsed icon rail.

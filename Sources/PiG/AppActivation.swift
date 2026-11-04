@@ -50,6 +50,11 @@ final class PiGAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
             return confirmStoppingWork() ? .terminateNow : .terminateCancel
         }
     }
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Terminal navigation needs held letters to repeat, not open the macOS accent picker.
+        UserDefaults.standard.set(false, forKey: "ApplePressAndHoldEnabled")
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A dying terminal pty (or any closed pipe) raises SIGPIPE on write,
         // which terminates the whole app by default. Handle EPIPE errors instead.
