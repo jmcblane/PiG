@@ -153,7 +153,7 @@ enum MarkdownSelectableTextBuilder {
         let role: MessageRole
         let theme: AppThemeChoice
         let projectPath: String?
-        let textSizeStep: Int
+        let textStyle: TextStyle
     }
 
     private struct SegmentKey: Hashable {
@@ -161,7 +161,7 @@ enum MarkdownSelectableTextBuilder {
         let role: MessageRole
         let theme: AppThemeChoice
         let projectPath: String?
-        let textSizeStep: Int
+        let textStyle: TextStyle
     }
 
     // Segments that did not change return the identical instance, which lets
@@ -186,7 +186,7 @@ enum MarkdownSelectableTextBuilder {
         projectPath: String? = nil,
         cacheable: Bool = true
     ) -> MarkdownAttributedText {
-        let segmentKey = SegmentKey(blocks: blocks, role: role, theme: theme, projectPath: projectPath, textSizeStep: TextSizePreference.step)
+        let segmentKey = SegmentKey(blocks: blocks, role: role, theme: theme, projectPath: projectPath, textStyle: .current)
         if let cached = segmentCache.value(for: segmentKey) { return cached }
         let built = makeText(blocks: blocks, role: role, theme: theme, projectPath: projectPath, cacheable: cacheable)
         if cacheable { segmentCache.insert(built, for: segmentKey) }
@@ -223,7 +223,7 @@ enum MarkdownSelectableTextBuilder {
         var styleHasher = Hasher()
         styleHasher.combine(role)
         styleHasher.combine(theme)
-        styleHasher.combine(TextSizePreference.step)
+        styleHasher.combine(TextStyle.current)
         return MarkdownAttributedText(
             attributed: result.copy() as? NSAttributedString ?? NSAttributedString(),
             stablePrefixLength: stablePrefixLength,
@@ -232,7 +232,7 @@ enum MarkdownSelectableTextBuilder {
     }
 
     private static func render(_ block: MarkdownBlock, role: MessageRole, theme: AppThemeChoice, projectPath: String?, cacheable: Bool) -> NSAttributedString {
-        let key = BlockKey(block: block, role: role, theme: theme, projectPath: projectPath, textSizeStep: TextSizePreference.step)
+        let key = BlockKey(block: block, role: role, theme: theme, projectPath: projectPath, textStyle: .current)
         if let cached = blockCache.value(for: key) { return cached }
 
         let palette = theme.palette.markdown
@@ -626,6 +626,8 @@ struct SelectableMarkdownText: NSViewRepresentable {
     /// Report the laid-out line width instead of the full proposed width,
     /// so a short message can size its container (the user bubble) to fit.
     var hugsWidth = false
+    /// Fade in text appended to the end (paragraph streaming).
+    var fadesAppendedText = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -660,6 +662,7 @@ struct SelectableMarkdownText: NSViewRepresentable {
         coordinator.text = text
         coordinator.sizeForWidth.removeAll()
         guard let storage = view.textStorage else { return }
+        let previousLength = storage.length
 
         guard let previous,
               previous.styleKey == text.styleKey,
@@ -668,7 +671,14 @@ struct SelectableMarkdownText: NSViewRepresentable {
               reusable > 0,
               reusable <= text.attributed.length,
               sharesTextPrefix(previous.attributed, text.attributed, length: reusable) else {
+            coordinator.fade.stop()
             storage.setAttributedString(text.attributed)
+            // With no reusable prefix (one paragraph or one list so far), an
+            // append still arrives here as a full replacement.
+            if fadesAppendedText, let previous, storage.length > previousLength,
+               text.attributed.string.hasPrefix(previous.attributed.string) {
+                coordinator.fade.start(in: view, range: NSRange(location: previousLength, length: storage.length - previousLength))
+            }
             return
         }
 
@@ -678,6 +688,9 @@ struct SelectableMarkdownText: NSViewRepresentable {
         storage.beginEditing()
         storage.replaceCharacters(in: NSRange(location: reusable, length: storage.length - reusable), with: tail)
         storage.endEditing()
+        if fadesAppendedText, storage.length > previousLength {
+            coordinator.fade.start(in: view, range: NSRange(location: previousLength, length: storage.length - previousLength))
+        }
     }
 
     // Cheap guard for the incremental path: the stable-prefix bookkeeping
@@ -688,8 +701,68 @@ struct SelectableMarkdownText: NSViewRepresentable {
         return (lhs.string as NSString).substring(to: length) == (rhs.string as NSString).substring(to: length)
     }
 
+    @MainActor
     final class Coordinator {
         var text: MarkdownAttributedText?
         var sizeForWidth: [CGFloat: CGSize] = [:]
+        let fade = AppendedTextFade()
+    }
+}
+
+/// Ramps the alpha of newly appended text with layout-manager temporary
+/// attributes, which change drawing without touching the text storage.
+/// A new append finishes any fade still running.
+@MainActor
+final class AppendedTextFade {
+    private weak var view: NSTextView?
+    private var range = NSRange(location: 0, length: 0)
+    private var startedAt = Date()
+    private var timer: Timer?
+
+    func start(in view: NSTextView, range: NSRange) {
+        stop()
+        self.view = view
+        self.range = range
+        startedAt = Date()
+        apply(alpha: 0)
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { timer.invalidate(); return }
+                self.tick()
+            }
+        }
+        // Common modes keep the fade running during mouse tracking, such as a selection drag.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        guard let layoutManager = view?.layoutManager, let length = view?.textStorage?.length else { return }
+        let clamped = NSIntersectionRange(range, NSRange(location: 0, length: length))
+        if clamped.length > 0 { layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: clamped) }
+        view = nil
+    }
+
+    private func tick() {
+        let progress = Date().timeIntervalSince(startedAt) / StreamingFade.duration
+        guard progress < 1 else { stop(); return }
+        // Ease out, matching the SwiftUI segment fade.
+        apply(alpha: 1 - pow(1 - progress, 2))
+    }
+
+    private func apply(alpha: CGFloat) {
+        guard let view, let layoutManager = view.layoutManager, let storage = view.textStorage else { return }
+        let clamped = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
+        guard clamped.length > 0 else { return }
+        storage.enumerateAttribute(.foregroundColor, in: clamped) { value, subrange, _ in
+            let color = value as? NSColor ?? view.textColor ?? .textColor
+            layoutManager.addTemporaryAttribute(
+                .foregroundColor,
+                value: color.withAlphaComponent(color.alphaComponent * alpha),
+                forCharacterRange: subrange
+            )
+        }
     }
 }

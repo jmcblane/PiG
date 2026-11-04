@@ -74,7 +74,7 @@ struct ToolActivityView: View {
     let projectPath: String?
     let activityText: String
     let theme: AppThemeChoice
-    let textSizeStep: Int
+    let textStyle: TextStyle
     let showThinkingTraces: Bool
     let highlightedMessageID: String?
     var htmlArtifacts: [String: HTMLArtifact] = [:]
@@ -156,7 +156,7 @@ struct ToolActivityView: View {
                         projectPath: projectPath,
                         activityText: activityText,
                         theme: theme,
-                        textSizeStep: textSizeStep,
+                        textStyle: textStyle,
                         showThinkingTraces: showThinkingTraces,
                         isHighlighted: highlightedMessageID == message.id,
                         showsActivityIndicator: false,

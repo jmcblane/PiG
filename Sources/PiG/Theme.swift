@@ -763,61 +763,82 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
 }
 
 enum AppFonts {
-    static let codeFamilies = ["Hack Nerd Font", "Hack Nerd Font Mono"]
+    static let installedHackFamily = ["Hack Nerd Font", "Hack Nerd Font Mono"].first(where: FontFamilies.isInstalled)
     static func scaled(_ size: CGFloat) -> CGFloat { size * TextSizePreference.scale }
 
     static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: scaled(size), weight: weight, design: .default)
+        interface(size, weight: weight, heading: false)
     }
 
     static func heading(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        .system(size: scaled(size), weight: weight, design: .rounded)
+        interface(size, weight: weight, heading: true)
     }
 
     static func code(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         let size = scaled(size)
-        if let family = installedCodeFamily(size: size) {
+        if let family = FontPreference.code.fontFamily {
             return .custom(family, size: size).weight(weight)
         }
         return .system(size: size, weight: weight, design: .monospaced)
     }
 
     static func nsUI(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
-        NSFont.systemFont(ofSize: scaled(size), weight: weight)
+        nsInterface(size, weight: weight, heading: false)
     }
 
     static func nsHeading(_ size: CGFloat, weight: NSFont.Weight = .semibold) -> NSFont {
-        let size = scaled(size)
-        let font = NSFont.systemFont(ofSize: size, weight: weight)
-        if let descriptor = font.fontDescriptor.withDesign(.rounded),
-           let rounded = NSFont(descriptor: descriptor, size: size) {
-            return rounded
-        }
-        return font
+        nsInterface(size, weight: weight, heading: true)
     }
 
     static func nsCode(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         let size = scaled(size)
-        if let family = installedCodeFamily(size: size), let font = NSFont(name: family, size: size) {
+        if let family = FontPreference.code.fontFamily, let font = nsFont(family: family, size: size, weight: weight) {
             return font
         }
         return NSFont.monospacedSystemFont(ofSize: size, weight: weight)
     }
 
-    private static func installedCodeFamily(size: CGFloat) -> String? {
-        codeFamilies.first { NSFont(name: $0, size: size) != nil }
+    private static func interface(_ size: CGFloat, weight: Font.Weight, heading: Bool) -> Font {
+        let size = scaled(size)
+        let choice = FontPreference.interface
+        if let family = choice.customFamily {
+            return .custom(family, size: size).weight(weight)
+        }
+        return .system(size: size, weight: weight, design: choice.design(heading: heading))
+    }
+
+    private static func nsInterface(_ size: CGFloat, weight: NSFont.Weight, heading: Bool) -> NSFont {
+        let size = scaled(size)
+        let choice = FontPreference.interface
+        if let family = choice.customFamily, let font = nsFont(family: family, size: size, weight: weight) {
+            return font
+        }
+        let font = NSFont.systemFont(ofSize: size, weight: weight)
+        if let descriptor = font.fontDescriptor.withDesign(choice.nsDesign(heading: heading)),
+           let designed = NSFont(descriptor: descriptor, size: size) {
+            return designed
+        }
+        return font
+    }
+
+    private static func nsFont(family: String, size: CGFloat, weight: NSFont.Weight) -> NSFont? {
+        let descriptor = NSFontDescriptor(fontAttributes: [
+            .family: family,
+            .traits: [NSFontDescriptor.TraitKey.weight: weight.rawValue]
+        ])
+        return NSFont(descriptor: descriptor, size: size)
     }
 }
 
 struct AppTheme: Hashable {
     let choice: AppThemeChoice
     let palette: AppThemePalette
-    let textSizeStep: Int
+    let textStyle: TextStyle
 
-    init(choice: AppThemeChoice, textSizeStep: Int = TextSizePreference.step) {
+    init(choice: AppThemeChoice, textStyle: TextStyle = .current) {
         self.choice = choice
         self.palette = choice.palette
-        self.textSizeStep = textSizeStep
+        self.textStyle = textStyle
     }
 
     var background: Color { palette.background.color }

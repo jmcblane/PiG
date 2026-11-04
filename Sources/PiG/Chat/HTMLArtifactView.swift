@@ -83,7 +83,7 @@ struct HTMLArtifactView: View {
     @Environment(\.appTheme) private var appTheme
     let artifact: HTMLArtifact
     let theme: AppThemeChoice
-    var textSizeStep: Int = TextSizePreference.step
+    var textStyle: TextStyle = .current
     var onSendMessage: ((String) -> Void)? = nil
     @State private var measuredHeight: CGFloat = 44
     @State private var hovering = false
@@ -95,7 +95,7 @@ struct HTMLArtifactView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HTMLArtifactWebView(
-                artifact: artifact, theme: theme, textSizeStep: textSizeStep,
+                artifact: artifact, theme: theme, textStyle: textStyle,
                 onHeight: { measuredHeight = $0 },
                 onAction: { action in
                     if onSendMessage != nil, pendingAction == nil { pendingAction = action }
@@ -136,7 +136,7 @@ struct HTMLArtifactView: View {
                     Button("Done") { showsSource = false }.keyboardShortcut(.cancelAction)
                 }
                 ScrollView {
-                    NativeCodeBlockView(code: artifact.html, language: "html", theme: theme, textSizeStep: textSizeStep)
+                    NativeCodeBlockView(code: artifact.html, language: "html", theme: theme, textStyle: textStyle)
                 }
             }
             .padding(18)
@@ -189,7 +189,7 @@ struct HTMLArtifactView: View {
 private struct HTMLArtifactWebView: NSViewRepresentable {
     let artifact: HTMLArtifact
     let theme: AppThemeChoice
-    let textSizeStep: Int
+    let textStyle: TextStyle
     let onHeight: (CGFloat) -> Void
     let onAction: (HTMLWidgetAction) -> Void
     let onError: (String) -> Void
@@ -236,12 +236,12 @@ private struct HTMLArtifactWebView: NSViewRepresentable {
         coordinator.onAction = onAction
         coordinator.onError = onError
         webView.underPageBackgroundColor = theme.palette.background.nsColor
-        if coordinator.artifact != artifact || coordinator.theme != theme || coordinator.textSizeStep != textSizeStep {
+        if coordinator.artifact != artifact || coordinator.theme != theme || coordinator.textStyle != textStyle {
             coordinator.artifact = artifact
             coordinator.theme = theme
-            coordinator.textSizeStep = textSizeStep
+            coordinator.textStyle = textStyle
             coordinator.loadedDocument = nil
-            coordinator.document = HTMLWidgetDocument.make(artifact: artifact, theme: theme, textSizeStep: textSizeStep)
+            coordinator.document = HTMLWidgetDocument.make(artifact: artifact, theme: theme, textStyle: textStyle)
         }
         coordinator.loadIfNeeded(in: webView)
     }
@@ -265,7 +265,7 @@ private struct HTMLArtifactWebView: NSViewRepresentable {
         weak var webView: WKWebView?
         var artifact: HTMLArtifact?
         var theme: AppThemeChoice?
-        var textSizeStep: Int?
+        var textStyle: TextStyle?
         var document: String?
         var loadedDocument: String?
         var generation = ""

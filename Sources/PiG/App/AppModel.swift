@@ -87,6 +87,15 @@ final class AppModel: ObservableObject {
     @Published var textSizeStep: Int = TextSizePreference.step {
         didSet { TextSizePreference.step = textSizeStep }
     }
+    @Published var interfaceFont: InterfaceFont = FontPreference.interface {
+        didSet { FontPreference.interface = interfaceFont }
+    }
+    @Published var codeFont: CodeFont = FontPreference.code {
+        didSet { FontPreference.code = codeFont }
+    }
+    var textStyle: TextStyle {
+        TextStyle(sizeStep: textSizeStep, interfaceFont: interfaceFont, codeFont: codeFont)
+    }
     @Published var selectedTheme: AppThemeChoice = AppThemeChoice.stored {
         didSet { AppThemeChoice.stored = selectedTheme }
     }

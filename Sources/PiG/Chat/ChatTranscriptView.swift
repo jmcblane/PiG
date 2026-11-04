@@ -14,6 +14,8 @@ protocol ChatTranscriptSource: ObservableObject {
     var isWorking: Bool { get }
     var isThinking: Bool { get }
     var isCompacting: Bool { get }
+    /// Activity shown after the transcript when there is no streaming assistant row.
+    var trailingActivityText: String? { get }
     var transcriptProjectPath: String? { get }
     var streamingFrameToken: Int { get }
     var messageScrollRequest: MessageScrollRequest? { get }
@@ -26,6 +28,7 @@ protocol ChatTranscriptSource: ObservableObject {
 
 extension ChatTranscriptSource {
     var backgroundJobTools: [String: ToolDisplay] { [:] }
+    var trailingActivityText: String? { nil }
 }
 
 extension SessionController: ChatTranscriptSource {
@@ -88,7 +91,7 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                     isAtBottom: $isAtBottom,
                     forceScrollToken: forceScrollToken,
                     streamingFrameToken: controller.streamingFrameToken,
-                    textSizeStep: model.textSizeStep,
+                    textStyle: model.textStyle,
                     topAnchorToken: topAnchorToken,
                     messageScrollRequest: controller.messageScrollRequest
                 ) {
@@ -107,7 +110,7 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                                     projectPath: controller.transcriptProjectPath,
                                     activityText: activityText,
                                     theme: theme,
-                                    textSizeStep: model.textSizeStep,
+                                    textStyle: model.textStyle,
                                     showThinkingTraces: model.showThinkingTraces,
                                     isHighlighted: highlightedMessageID == message.id,
                                     htmlArtifacts: presentation.widgets(for: message),
@@ -125,14 +128,14 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                                     projectPath: controller.transcriptProjectPath,
                                     activityText: activityText,
                                     theme: theme,
-                                    textSizeStep: model.textSizeStep,
+                                    textStyle: model.textStyle,
                                     showThinkingTraces: model.showThinkingTraces,
                                     highlightedMessageID: highlightedMessageID,
                                     htmlArtifacts: presentation.htmlArtifacts,
                                     htmlActionTarget: controller.htmlActionTarget
                                 )
                             case .htmlArtifact(let artifact):
-                                HTMLArtifactView(artifact: artifact, theme: theme, textSizeStep: model.textSizeStep,
+                                HTMLArtifactView(artifact: artifact, theme: theme, textStyle: model.textStyle,
                                                  onSendMessage: controller.htmlActionTarget == nil ? nil : sendHTMLMessage)
                                     .padding(.leading, 18)
                                     .padding(.trailing, 18)
@@ -162,6 +165,12 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                             }
                         }
                         .environment(\.revealMessage, reveal)
+                        if let text = controller.trailingActivityText {
+                            InlineActivityIndicator(text: text)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         // controller.errorText surfaces via the arbitrated root toast
                         // plus the 'Last error' affordance near the composer.
                     }
@@ -183,6 +192,7 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                 .onAppear { forceScrollToken += 1 }
                 .onChange(of: controller.id) { _, _ in forceScrollToken += 1 }
                 .onChange(of: controller.bottomScrollRequest) { _, _ in forceScrollToken += 1 }
+                .onChange(of: controller.trailingActivityText) { _, _ in forceScrollToken += 1 }
                 .onChange(of: controller.messageScrollRequest) { _, request in
                     guard let request else { return }
                     highlightedMessageID = request.messageID
@@ -601,7 +611,7 @@ struct ChatMessageRow: View, Equatable {
     let projectPath: String?
     let activityText: String
     let theme: AppThemeChoice
-    var textSizeStep: Int = TextSizePreference.step
+    var textStyle: TextStyle = .current
     let showThinkingTraces: Bool
     let isHighlighted: Bool
     var showsActivityIndicator = true
@@ -616,7 +626,7 @@ struct ChatMessageRow: View, Equatable {
         lhs.projectPath == rhs.projectPath &&
         lhs.activityText == rhs.activityText &&
         lhs.theme == rhs.theme &&
-        lhs.textSizeStep == rhs.textSizeStep &&
+        lhs.textStyle == rhs.textStyle &&
         lhs.showThinkingTraces == rhs.showThinkingTraces &&
         lhs.isHighlighted == rhs.isHighlighted &&
         lhs.showsActivityIndicator == rhs.showsActivityIndicator &&
@@ -681,7 +691,7 @@ struct ChatMessageRow: View, Equatable {
     private var standardRow: some View {
         VStack(alignment: .leading, spacing: 10) {
             if showThinkingTraces, !message.thinking.isEmpty {
-                NativeMarkdownView(markdown: message.thinking, role: .system, theme: theme, isStreaming: message.isStreaming, projectPath: projectPath, textSizeStep: textSizeStep)
+                NativeMarkdownView(markdown: message.thinking, role: .system, theme: theme, isStreaming: message.isStreaming, projectPath: projectPath, textStyle: textStyle)
             }
             detachedReferences
             messageImages
@@ -793,13 +803,13 @@ struct ChatMessageRow: View, Equatable {
                 theme: theme,
                 isStreaming: message.isStreaming,
                 projectPath: projectPath,
-                textSizeStep: textSizeStep,
+                textStyle: textStyle,
                 hugsWidth: message.role == .user
             )
         } else if !message.text.isEmpty {
             NativeMarkdownView(
                 markdown: message.text, role: message.role, theme: theme,
-                isStreaming: message.isStreaming, projectPath: projectPath, textSizeStep: textSizeStep,
+                isStreaming: message.isStreaming, projectPath: projectPath, textStyle: textStyle,
                 htmlArtifacts: htmlArtifacts,
                 onSendHTMLMessage: htmlActionTarget == nil ? nil : sendHTMLMessage,
                 hugsWidth: message.role == .user

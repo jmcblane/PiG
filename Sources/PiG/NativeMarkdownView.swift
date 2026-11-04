@@ -286,7 +286,7 @@ enum MarkdownInlineRenderer {
     private static let cache = MarkdownFIFOCache<String, AttributedString>(limit: 800, costLimit: 2 << 20)
 
     static func attributed(_ markdown: String, theme: AppThemeChoice, cacheable: Bool) -> AttributedString {
-        let key = "\(TextSizePreference.step)|\(theme.rawValue)|\(markdown)"
+        let key = "\(TextStyle.current.hashValue)|\(theme.rawValue)|\(markdown)"
         if let cached = cache.value(for: key) { return cached }
 
         let palette = theme.palette.markdown
@@ -414,7 +414,7 @@ private final class PreparedNativeMarkdown: @unchecked Sendable {
         var role: MessageRole
         var theme: AppThemeChoice
         var projectPath: String?
-        var textSizeStep: Int
+        var textStyle: TextStyle
     }
 
     let segments: [MarkdownRenderSegment]
@@ -457,7 +457,7 @@ private final class PreparedNativeMarkdown: @unchecked Sendable {
     }
 
     static func key(markdown: String, role: MessageRole, theme: AppThemeChoice, projectPath: String?) -> Key {
-        Key(markdown: markdown, role: role, theme: theme, projectPath: projectPath, textSizeStep: TextSizePreference.step)
+        Key(markdown: markdown, role: role, theme: theme, projectPath: projectPath, textStyle: .current)
     }
 }
 
@@ -509,11 +509,12 @@ struct NativeMarkdownView: View {
     let theme: AppThemeChoice
     var isStreaming = false
     var projectPath: String? = nil
-    var textSizeStep: Int = TextSizePreference.step
+    var textStyle: TextStyle = .current
     var htmlArtifacts: [String: HTMLArtifact] = [:]
     var onSendHTMLMessage: ((String) -> Void)? = nil
     /// Size to the content rather than the proposed width (user bubbles).
     var hugsWidth = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // Preparation is synchronous. It used to hop to a background task and
     // render a 1pt placeholder until the result arrived, which collapsed the
@@ -529,9 +530,12 @@ struct NativeMarkdownView: View {
             cacheable: !isStreaming
         )
         let palette = theme.palette.markdown
+        // Paragraph streaming fades in each block as it is revealed.
+        let fadesIn = isStreaming && !reduceMotion && ResponseStreamingPreference.current == .paragraphs
         VStack(alignment: .leading, spacing: 10) {
             ForEach(prepared.segments.indices, id: \.self) { index in
-                segmentView(prepared.segments[index], index: index, prepared: prepared, palette: palette)
+                segmentView(prepared.segments[index], index: index, prepared: prepared, palette: palette, fadesIn: fadesIn)
+                    .modifier(StreamingFadeIn(active: fadesIn))
             }
         }
         .frame(maxWidth: hugsWidth ? nil : .infinity, alignment: .leading)
@@ -543,17 +547,17 @@ struct NativeMarkdownView: View {
             : theme.palette.markdown.assistantForeground.color
     }
 
-    @ViewBuilder private func segmentView(_ segment: MarkdownRenderSegment, index: Int, prepared: PreparedNativeMarkdown, palette: MarkdownThemePalette) -> some View {
+    @ViewBuilder private func segmentView(_ segment: MarkdownRenderSegment, index: Int, prepared: PreparedNativeMarkdown, palette: MarkdownThemePalette, fadesIn: Bool) -> some View {
         switch segment {
         case .text:
             if let text = prepared.attributedText[index] {
-                SelectableMarkdownText(text: text, hugsWidth: hugsWidth)
+                SelectableMarkdownText(text: text, hugsWidth: hugsWidth, fadesAppendedText: fadesIn)
             }
         case .code(let code, let language):
-            NativeCodeBlockView(code: code, language: language, theme: theme, textSizeStep: textSizeStep)
+            NativeCodeBlockView(code: code, language: language, theme: theme, textStyle: textStyle)
         case .htmlWidget(let reference):
             if role == .assistant, let artifact = htmlArtifacts[reference] {
-                HTMLArtifactView(artifact: artifact, theme: theme, textSizeStep: textSizeStep, onSendMessage: onSendHTMLMessage)
+                HTMLArtifactView(artifact: artifact, theme: theme, textStyle: textStyle, onSendMessage: onSendHTMLMessage)
             } else {
                 Text(role == .assistant ? "Interactive controls unavailable" : "[[pig-ui:\(reference)]]")
                     .font(AppFonts.ui(13))
@@ -601,11 +605,31 @@ struct NativeMarkdownView: View {
     }
 }
 
+/// Fades a segment in when it first appears. A segment that appears while
+/// `active` is false shows at once, and turning `active` off later never hides it.
+private struct StreamingFadeIn: ViewModifier {
+    let active: Bool
+    @State private var appeared = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(active && !appeared ? 0 : 1)
+            .onAppear {
+                guard active else { appeared = true; return }
+                withAnimation(.easeOut(duration: StreamingFade.duration)) { appeared = true }
+            }
+    }
+}
+
+enum StreamingFade {
+    static let duration: TimeInterval = 0.6
+}
+
 struct NativeCodeBlockView: View {
     let code: String
     var language: String?
     let theme: AppThemeChoice
-    var textSizeStep: Int = TextSizePreference.step
+    var textStyle: TextStyle = .current
     @State private var hovering = false
     @State private var copied = false
 

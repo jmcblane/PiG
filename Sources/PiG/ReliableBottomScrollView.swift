@@ -5,7 +5,7 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
     @Binding var isAtBottom: Bool
     let forceScrollToken: Int
     let streamingFrameToken: Int
-    var textSizeStep: Int = TextSizePreference.step
+    var textStyle: TextStyle = .current
     var topAnchorToken: Int = 0
     var messageScrollRequest: MessageScrollRequest? = nil
     let content: () -> Content
@@ -39,7 +39,7 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         context.coordinator.scrollView = scrollView
         context.coordinator.hostingView = hosting
         context.coordinator.lastForceToken = forceScrollToken
-        context.coordinator.lastTextSizeStep = textSizeStep
+        context.coordinator.lastTextStyle = textStyle
         context.coordinator.lastStreamingFrameToken = streamingFrameToken
         context.coordinator.lastTopAnchorToken = topAnchorToken
         context.coordinator.lastMessageScrollRequestID = messageScrollRequest?.id
@@ -63,8 +63,8 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         guard let hosting = context.coordinator.hostingView else { return }
         hosting.rootView = content()
 
-        let sizeChanged = context.coordinator.lastTextSizeStep != textSizeStep
-        if sizeChanged { context.coordinator.lastTextSizeStep = textSizeStep }
+        let styleChanged = context.coordinator.lastTextStyle != textStyle
+        if styleChanged { context.coordinator.lastTextStyle = textStyle }
         let forced = context.coordinator.lastForceToken != forceScrollToken
         if forced { context.coordinator.lastForceToken = forceScrollToken }
         let streamingFrame = context.coordinator.lastStreamingFrameToken != streamingFrameToken
@@ -78,10 +78,10 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
             context.coordinator.scrollToMessage(request.messageID)
         } else if topInsert && !forced {
             context.coordinator.relayoutPreservingTopInsertion()
-        } else if streamingFrame && !forced && !sizeChanged {
+        } else if streamingFrame && !forced && !styleChanged {
             context.coordinator.relayoutStreamingFrame(follow: context.coordinator.shouldFollowBottom)
         } else {
-            context.coordinator.relayout(follow: forced || context.coordinator.shouldFollowBottom, force: forced || sizeChanged)
+            context.coordinator.relayout(follow: forced || context.coordinator.shouldFollowBottom, force: forced || styleChanged)
         }
     }
 
@@ -94,7 +94,7 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         weak var hostingView: TranscriptHostingView<Content>?
         var isAtBottomBinding: Binding<Bool>
         var lastForceToken = 0
-        var lastTextSizeStep = TextSizePreference.step
+        var lastTextStyle = TextStyle.current
         var lastStreamingFrameToken = 0
         var lastTopAnchorToken = 0
         var lastMessageScrollRequestID: UUID?

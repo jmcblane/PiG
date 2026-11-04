@@ -78,6 +78,26 @@ enum HTMLRenderPreference {
     }
 }
 
+enum ResponseStreamingPreference: String, CaseIterable, Identifiable {
+    case live
+    case paragraphs
+
+    static let key = "PiG.responseStreaming"
+
+    static var current: ResponseStreamingPreference {
+        ResponseStreamingPreference(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .live
+    }
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .live: return "Live"
+        case .paragraphs: return "Finished paragraphs"
+        }
+    }
+}
+
 enum TitleGenerationExtensionsPreference {
     static let key = "PiG.sessionNaming.titleExtensions"
 

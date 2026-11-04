@@ -223,15 +223,15 @@ struct GrowingComposerTextView: NSViewRepresentable {
         context.coordinator.minHeight = minHeight
         context.coordinator.maxHeight = maxHeight
         let themeChanged = context.coordinator.theme != theme
-        let sizeChanged = context.coordinator.textSizeStep != TextSizePreference.step
-        context.coordinator.textSizeStep = TextSizePreference.step
+        let styleChanged = context.coordinator.textStyle != TextStyle.current
+        context.coordinator.textStyle = TextStyle.current
         context.coordinator.theme = theme
         applyTheme(to: textView)
-        if sizeChanged {
+        if styleChanged {
             textView.font = AppFonts.nsUI(15.5)
             textView.minSize.height = minHeight
         }
-        if context.coordinator.canonicalText(in: textView) != text || themeChanged || sizeChanged {
+        if context.coordinator.canonicalText(in: textView) != text || themeChanged || styleChanged {
             context.coordinator.applyCanonicalText(text, to: textView)
         }
         if focusRequest > 0, focusRequest != context.coordinator.handledFocusRequest {
@@ -273,7 +273,7 @@ struct GrowingComposerTextView: NSViewRepresentable {
         weak var scrollView: NSScrollView?
         var tabCompletion: (String, NSRange) -> ComposerTabCompletionResult
         var theme: AppThemeChoice
-        var textSizeStep = TextSizePreference.step
+        var textStyle = TextStyle.current
         var handledFocusRequest = 0
         var handledCursorEndRequest = 0
 

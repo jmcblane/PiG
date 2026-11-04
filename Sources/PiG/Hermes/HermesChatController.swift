@@ -186,6 +186,11 @@ extension HermesChatController: ChatTranscriptSource {
     func loadEarlierMessages() { visibleMessageLimit = min(messages.count, visibleMessageLimit + 100) }
     var isThinking: Bool { false }
     var isCompacting: Bool { false }
+    var trailingActivityText: String? {
+        if approval != nil { return "Waiting for approval" }
+        guard isWorking else { return nil }
+        return currentTool?.nonEmptyTrimmed?.oneLine(max: 40) ?? "Working"
+    }
     var transcriptProjectPath: String? { nil }
     var streamingFrameToken: Int { 0 }
     var messageScrollRequest: MessageScrollRequest? { nil }

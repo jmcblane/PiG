@@ -80,11 +80,6 @@ struct HermesComposerView: View {
         HStack(alignment: .center, spacing: 8) {
             HermesModelPicker(controller: controller)
             Spacer(minLength: 8)
-            if controller.approval != nil {
-                InlineActivityIndicator(text: "Waiting for approval")
-            } else if controller.isWorking {
-                InlineActivityIndicator(text: controller.currentTool?.nonEmptyTrimmed?.oneLine(max: 40) ?? "Working")
-            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 2)

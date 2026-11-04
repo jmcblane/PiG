@@ -6,7 +6,7 @@ private struct ThemedRootView: View {
 
     var body: some View {
         RootView()
-            .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textSizeStep: model.textSizeStep))
+            .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textStyle: model.textStyle))
     }
 }
 
@@ -130,7 +130,7 @@ struct PiGApp: App {
             }
             .frame(width: 600, height: 680)
             .environmentObject(model)
-            .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textSizeStep: model.textSizeStep))
+            .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textStyle: model.textStyle))
             .preferredColorScheme(model.selectedTheme.isLight ? .light : .dark)
             .sheet(item: Binding(
                 get: { model.agentEditorInSettings ? model.agentEditorRequest : nil },
@@ -138,7 +138,7 @@ struct PiGApp: App {
             )) { request in
                 AgentEditorView(request: request)
                     .environmentObject(model)
-                    .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textSizeStep: model.textSizeStep))
+                    .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textStyle: model.textStyle))
             }
         }
     }

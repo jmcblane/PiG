@@ -52,9 +52,10 @@ enum HTMLWidgetDocument {
         """
     }
 
-    static func make(artifact: HTMLArtifact, theme: AppThemeChoice, textSizeStep: Int) -> String {
+    static func make(artifact: HTMLArtifact, theme: AppThemeChoice, textStyle: TextStyle) -> String {
         let palette = theme.palette
-        let scale = Double(TextSizePreference.steps[min(max(textSizeStep, 0), TextSizePreference.steps.count - 1)])
+        let scale = Double(textStyle.scale)
+        let fontFamily = cssFontFamily(textStyle.interfaceFont)
         let colorScheme = palette.background.relativeLuminance < 0.5 ? "dark" : "light"
         let accentForeground = palette.accent.relativeLuminance > 0.179 ? "#000000" : "#ffffff"
         let policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';"
@@ -73,7 +74,7 @@ enum HTMLWidgetDocument {
           }
           * { box-sizing: border-box; }
           html, body { margin: 0; padding: 0; min-height: 0; height: auto; background: var(--pig-bg); }
-          body { color: var(--pig-fg); font: \(15.5 * scale)px -apple-system, BlinkMacSystemFont, sans-serif; overflow-x: hidden; }
+          body { color: var(--pig-fg); font: \(15.5 * scale)px \(fontFamily); overflow-x: hidden; }
           #pig-widget-root { display: flow-root; padding: 4px; overflow-wrap: anywhere; }
           .pig-controls, [role="group"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
           button, input, select, textarea { font: inherit; font-size: \(13 * scale)px; }
@@ -103,6 +104,16 @@ enum HTMLWidgetDocument {
         <style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:\(palette.background.hex)}iframe{display:block;width:100%;height:100%;border:0;background:transparent}</style>
         </head><body><iframe title="\(escape(artifact.title))" sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc="\(escape(child))"></iframe></body></html>
         """
+    }
+
+    private static func cssFontFamily(_ font: InterfaceFont) -> String {
+        switch font {
+        case .system: "-apple-system, BlinkMacSystemFont, sans-serif"
+        case .rounded: "ui-rounded, -apple-system, sans-serif"
+        case .serif: "ui-serif, serif"
+        case .family(let name):
+            "\"\(name.filter { $0 != "\"" && $0 != "\\" })\", -apple-system, sans-serif"
+        }
     }
 
     private static func escape(_ html: String) -> String {

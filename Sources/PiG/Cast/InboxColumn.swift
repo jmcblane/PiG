@@ -78,21 +78,17 @@ struct InboxColumn: View {
             }
             .buttonStyle(TitlebarIconButtonStyle())
             .help("Settings")
-            if let title = model.inboxDismissalUndoTitle {
-                Text("Done: \(title)")
-                    .font(AppFonts.ui(12))
-                    .foregroundStyle(appTheme.secondaryText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .padding(.leading, 4)
-                Button("Undo") { model.undoLastInboxDismissal() }
-                    .buttonStyle(.plain)
-                    .font(AppFonts.ui(12, weight: .semibold))
-                    .foregroundStyle(appTheme.brass)
-                    .help("Reopen (⇧⌘T)")
-                    .fixedSize()
-            }
             Spacer(minLength: 4)
+            if model.canUndoInboxDismissal {
+                Button {
+                    model.undoLastInboxDismissal()
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .buttonStyle(TitlebarIconButtonStyle())
+                .accessibilityLabel("Undo")
+                .help("Reopen (⇧⌘T)")
+            }
             Button {
                 NotificationCenter.default.post(name: .pigOpenPalette, object: PaletteScope.sessions.rawValue)
             } label: {

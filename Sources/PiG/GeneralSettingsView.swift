@@ -11,6 +11,7 @@ struct GeneralSettingsView: View {
     @AppStorage(TerminalPaneMode.buttonDefaultKey) private var terminalButtonMode = TerminalPaneMode.full
     @AppStorage(OpenInTerminalTarget.key) private var openInTerminalTarget = OpenInTerminalTarget.pig
     @AppStorage(HTMLRenderPreference.key) private var htmlRenderEnabled = true
+    @AppStorage(ResponseStreamingPreference.key) private var responseStreaming = ResponseStreamingPreference.live
 
     var body: some View {
         Form {
@@ -20,6 +21,14 @@ struct GeneralSettingsView: View {
                         Text(theme.displayName).tag(theme)
                     }
                 }
+
+                FontChoicePicker(title: "Interface font", selection: $model.interfaceFont)
+                FontChoicePicker(
+                    title: "Code font",
+                    hint: model.codeFont.displayName.localizedCaseInsensitiveContains("Nerd Font")
+                        ? nil : "Terminal prompt icons need a Nerd Font.",
+                    selection: $model.codeFont
+                )
 
                 LabeledContent("Text size") {
                     HStack {
@@ -41,6 +50,13 @@ struct GeneralSettingsView: View {
                     }
                 }
                 .help(model.sessionRuntimePolicy.helpText)
+
+                Picker("Response streaming", selection: $responseStreaming) {
+                    ForEach(ResponseStreamingPreference.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .help("Finished paragraphs shows each paragraph, list item, or code block once it is complete.")
 
                 Toggle("Show thinking traces", isOn: $model.showThinkingTraces)
                 Toggle("Accent composer on focus", isOn: $model.composerFocusAccent)
@@ -214,6 +230,76 @@ struct GeneralSettingsView: View {
             if response == .OK, let url = panel.url {
                 quickChatsFolder = url.standardizedFileURL.path
             }
+        }
+    }
+}
+
+/// A preset menu with an "Other…" item that opens a searchable list of
+/// installed families.
+private struct FontChoicePicker<Choice: FontChoice>: View {
+    let title: String
+    var hint: String? = nil
+    @Binding var selection: Choice
+    @State private var browsing = false
+    @State private var search = ""
+
+    private enum Item: Hashable {
+        case preset(Choice)
+        case other
+    }
+
+    var body: some View {
+        Picker(selection: item) {
+            ForEach(Choice.presets, id: \.self) { choice in
+                Text(choice.displayName).tag(Item.preset(choice))
+            }
+            Divider()
+            Text(selection.customFamily ?? "Other…").tag(Item.other)
+        } label: {
+            Text(title)
+            if let hint { Text(hint) }
+        }
+
+        if showsFamilies {
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Search", text: $search, prompt: Text("Search fonts"))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                List(filteredFamilies, id: \.self, selection: familySelection) { family in
+                    Text(family).font(.custom(family, size: 13))
+                }
+                .listStyle(.bordered)
+                .frame(height: 150)
+            }
+        }
+    }
+
+    private var showsFamilies: Bool { browsing || selection.customFamily != nil }
+
+    private var filteredFamilies: [String] {
+        let query = search.trimmingCharacters(in: .whitespaces)
+        return query.isEmpty ? Choice.installedFamilies : Choice.installedFamilies.filter { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var item: Binding<Item> {
+        Binding {
+            showsFamilies ? .other : .preset(selection)
+        } set: { item in
+            switch item {
+            case .preset(let choice):
+                selection = choice
+                browsing = false
+            case .other:
+                browsing = true
+            }
+        }
+    }
+
+    private var familySelection: Binding<String?> {
+        Binding {
+            selection.customFamily
+        } set: { family in
+            if let family { selection = .family(family) }
         }
     }
 }

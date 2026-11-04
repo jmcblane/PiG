@@ -2136,6 +2136,16 @@ final class SessionController: ObservableObject, Identifiable {
     }
 
     private func resetStreamingState() {
+        // Show what the reveal had not reached yet, including any paragraph
+        // held back, so stopping never drops received text.
+        materializeStreamingAccumulatorSnapshot(complete: true)
+        if var target = streamingTargetMessage,
+           let index = messages.firstIndex(where: { $0.id == target.id }) {
+            target.isStreaming = false
+            target.tools = mergeTools(existing: messages[index].tools, incoming: target.tools)
+            messages[index] = target
+            streamingFrameToken += 1
+        }
         streamingRevealGeneration += 1
         streamingRevealScheduled = false
         if let id = streamingMessageID,
@@ -2176,12 +2186,15 @@ final class SessionController: ObservableObject, Identifiable {
         streamingTargetMessage = merged
     }
 
-    private func materializeStreamingAccumulatorSnapshot() {
-        guard streamingAccumulatorNeedsSnapshot,
+    /// `complete` takes everything streamed so far, including any unfinished
+    /// paragraph that paragraph mode was holding back.
+    private func materializeStreamingAccumulatorSnapshot(complete: Bool = false) {
+        guard streamingAccumulatorNeedsSnapshot || complete,
               let accumulator = streamingAccumulator,
               let id = streamingMessageID else { return }
         streamingAccumulatorNeedsSnapshot = false
-        updateStreamingTarget(accumulator.message(id: id))
+        let finishedParagraphsOnly = !complete && ResponseStreamingPreference.current == .paragraphs
+        updateStreamingTarget(accumulator.message(id: id, finishedParagraphsOnly: finishedParagraphsOnly))
     }
 
     private func reconcileToolExecution(existing: [ToolDisplay], authoritative: [ToolDisplay]) -> [ToolDisplay] {
@@ -2228,7 +2241,7 @@ final class SessionController: ObservableObject, Identifiable {
     private func finishStreamingReveal(immediate: Bool) {
         streamingRevealGeneration += 1
         streamingRevealScheduled = false
-        materializeStreamingAccumulatorSnapshot()
+        materializeStreamingAccumulatorSnapshot(complete: true)
         guard let target = streamingTargetMessage else {
             if let id = streamingMessageID, let index = messages.firstIndex(where: { $0.id == id }), messages[index].isStreaming {
                 messages[index].isStreaming = false
@@ -2256,7 +2269,10 @@ final class SessionController: ObservableObject, Identifiable {
         let current = messages[index]
         let textPlan = streamingRevealPlan(from: current.text, to: target.text)
         let thinkingPlan = streamingRevealPlan(from: current.thinking, to: target.thinking)
-        var budget = streamingRevealBudget(for: textPlan.remaining + thinkingPlan.remaining)
+        // Paragraph mode shows each finished block whole instead of typing it out.
+        var budget = ResponseStreamingPreference.current == .paragraphs
+            ? textPlan.remaining + thinkingPlan.remaining
+            : streamingRevealBudget(for: textPlan.remaining + thinkingPlan.remaining)
         let textReveal = reveal(textPlan, budget: &budget)
         let thinkingReveal = reveal(thinkingPlan, budget: &budget)
         var next = current
