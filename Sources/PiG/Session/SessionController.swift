@@ -163,6 +163,10 @@ final class SessionController: ObservableObject, Identifiable {
     private var streamingRevealScheduled = false
     private var streamingRevealGeneration = 0
     private let streamingRevealInterval: TimeInterval = 1.0 / 30.0
+    /// Paragraph mode spaces reveals at least this far apart so each
+    /// paragraph's fade (`StreamingFade.duration`) visibly plays, after T3 Code.
+    private let paragraphRevealInterval: TimeInterval = 0.4
+    private var lastTextRevealAt = Date.distantPast
     private let createdAsNewSession: Bool
     private var hasExplicitModelSelection = false
     private var hasExplicitThinkingSelection = false
@@ -2227,6 +2231,11 @@ final class SessionController: ObservableObject, Identifiable {
     private func runStreamingRevealFrame() {
         materializeStreamingAccumulatorSnapshot()
         guard let target = streamingTargetMessage else { return }
+        if paragraphRevealIsThrottled(toward: target) {
+            // The snapshot is cumulative, so a later frame shows everything finished meanwhile.
+            scheduleStreamingReveal()
+            return
+        }
         let complete = applyStreamingRevealFrame(toward: target)
         if complete {
             if !target.isStreaming {
@@ -2236,6 +2245,13 @@ final class SessionController: ObservableObject, Identifiable {
         } else {
             scheduleStreamingReveal()
         }
+    }
+
+    private func paragraphRevealIsThrottled(toward target: ChatMessage) -> Bool {
+        guard ResponseStreamingPreference.current == .paragraphs,
+              Date().timeIntervalSince(lastTextRevealAt) < paragraphRevealInterval,
+              let current = messages.first(where: { $0.id == target.id }) else { return false }
+        return current.text != target.text || current.thinking != target.thinking
     }
 
     private func finishStreamingReveal(immediate: Bool) {
@@ -2284,8 +2300,13 @@ final class SessionController: ObservableObject, Identifiable {
         next.thinking = thinkingReveal.value
         next.images = target.images
         next.tools = mergeTools(existing: current.tools, incoming: target.tools)
-        let complete = textReveal.complete && thinkingReveal.complete
+        let revealsText = next.text != current.text || next.thinking != current.thinking
+        // A paragraph-mode frame that reveals text stays streaming one more frame,
+        // so its text fades in even when the whole reply arrived at once.
+        let holdsForFade = revealsText && ResponseStreamingPreference.current == .paragraphs
+        let complete = textReveal.complete && thinkingReveal.complete && !holdsForFade
         next.isStreaming = target.isStreaming || !complete
+        if revealsText { lastTextRevealAt = Date() }
         if next != current {
             messages[index] = next
             streamingFrameToken += 1

@@ -514,6 +514,9 @@ struct NativeMarkdownView: View {
     var onSendHTMLMessage: ((String) -> Void)? = nil
     /// Size to the content rather than the proposed width (user bubbles).
     var hugsWidth = false
+    /// Identifies the streamed text across view rebuilds, so paragraph
+    /// streaming fades in only segments not yet shown (see `StreamingFadeLedger`).
+    var fadeID: String? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // Preparation is synchronous. It used to hop to a background task and
@@ -535,10 +538,13 @@ struct NativeMarkdownView: View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(prepared.segments.indices, id: \.self) { index in
                 segmentView(prepared.segments[index], index: index, prepared: prepared, palette: palette, fadesIn: fadesIn)
-                    .modifier(StreamingFadeIn(active: fadesIn))
+                    .modifier(StreamingFadeIn(active: fadesIn, fadeID: fadeID, index: index))
             }
         }
         .frame(maxWidth: hugsWidth ? nil : .infinity, alignment: .leading)
+        .onChange(of: isStreaming) { _, streaming in
+            if !streaming, let fadeID { StreamingFadeLedger.shownSegments[fadeID] = nil }
+        }
     }
 
     private var bodyColor: Color {
@@ -605,17 +611,39 @@ struct NativeMarkdownView: View {
     }
 }
 
+/// How many segments each streaming text has shown, keyed by `fadeID`. The
+/// transcript rebuilds a message's views when it regroups the message into or
+/// out of tool activity, and the new views must not fade in text already seen.
+@MainActor
+private enum StreamingFadeLedger {
+    static var shownSegments: [String: Int] = [:]
+}
+
 /// Fades a segment in when it first appears. A segment that appears while
-/// `active` is false shows at once, and turning `active` off later never hides it.
+/// `active` is false, or that an earlier view of the same text already
+/// showed, shows at once. Turning `active` off later never hides it.
 private struct StreamingFadeIn: ViewModifier {
     let active: Bool
-    @State private var appeared = false
+    let fadeID: String?
+    let index: Int
+    @State private var appeared: Bool
+
+    init(active: Bool, fadeID: String?, index: Int) {
+        self.active = active
+        self.fadeID = fadeID
+        self.index = index
+        // SwiftUI keeps only the first view's value, read before any rebuilt view records itself.
+        _appeared = State(initialValue: fadeID.map { index < StreamingFadeLedger.shownSegments[$0, default: 0] } ?? false)
+    }
 
     func body(content: Content) -> some View {
         content
             .opacity(active && !appeared ? 0 : 1)
             .onAppear {
-                guard active else { appeared = true; return }
+                if active, let fadeID {
+                    StreamingFadeLedger.shownSegments[fadeID] = max(index + 1, StreamingFadeLedger.shownSegments[fadeID, default: 0])
+                }
+                guard active, !appeared else { appeared = true; return }
                 withAnimation(.easeOut(duration: StreamingFade.duration)) { appeared = true }
             }
     }

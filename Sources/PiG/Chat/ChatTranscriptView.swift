@@ -691,7 +691,7 @@ struct ChatMessageRow: View, Equatable {
     private var standardRow: some View {
         VStack(alignment: .leading, spacing: 10) {
             if showThinkingTraces, !message.thinking.isEmpty {
-                NativeMarkdownView(markdown: message.thinking, role: .system, theme: theme, isStreaming: message.isStreaming, projectPath: projectPath, textStyle: textStyle)
+                NativeMarkdownView(markdown: message.thinking, role: .system, theme: theme, isStreaming: message.isStreaming, projectPath: projectPath, textStyle: textStyle, fadeID: "\(message.id)#thinking")
             }
             detachedReferences
             messageImages
@@ -812,7 +812,8 @@ struct ChatMessageRow: View, Equatable {
                 isStreaming: message.isStreaming, projectPath: projectPath, textStyle: textStyle,
                 htmlArtifacts: htmlArtifacts,
                 onSendHTMLMessage: htmlActionTarget == nil ? nil : sendHTMLMessage,
-                hugsWidth: message.role == .user
+                hugsWidth: message.role == .user,
+                fadeID: message.id
             )
         }
     }

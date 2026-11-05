@@ -671,12 +671,13 @@ struct SelectableMarkdownText: NSViewRepresentable {
               reusable > 0,
               reusable <= text.attributed.length,
               sharesTextPrefix(previous.attributed, text.attributed, length: reusable) else {
-            coordinator.fade.stop()
-            storage.setAttributedString(text.attributed)
             // With no reusable prefix (one paragraph or one list so far), an
             // append still arrives here as a full replacement.
-            if fadesAppendedText, let previous, storage.length > previousLength,
-               text.attributed.string.hasPrefix(previous.attributed.string) {
+            let appends = previous.map { text.attributed.string.hasPrefix($0.attributed.string) } ?? false
+            if !appends { coordinator.fade.stop() }
+            storage.setAttributedString(text.attributed)
+            coordinator.fade.refresh()
+            if fadesAppendedText, appends, storage.length > previousLength {
                 coordinator.fade.start(in: view, range: NSRange(location: previousLength, length: storage.length - previousLength))
             }
             return
@@ -688,6 +689,7 @@ struct SelectableMarkdownText: NSViewRepresentable {
         storage.beginEditing()
         storage.replaceCharacters(in: NSRange(location: reusable, length: storage.length - reusable), with: tail)
         storage.endEditing()
+        coordinator.fade.refresh()
         if fadesAppendedText, storage.length > previousLength {
             coordinator.fade.start(in: view, range: NSRange(location: previousLength, length: storage.length - previousLength))
         }
@@ -711,20 +713,24 @@ struct SelectableMarkdownText: NSViewRepresentable {
 
 /// Ramps the alpha of newly appended text with layout-manager temporary
 /// attributes, which change drawing without touching the text storage.
-/// A new append finishes any fade still running.
+/// Each append fades on its own clock, so a new append overlaps the fades
+/// still running instead of cutting them short.
 @MainActor
 final class AppendedTextFade {
+    private struct Fade {
+        var range: NSRange
+        var startedAt: Date
+    }
+
     private weak var view: NSTextView?
-    private var range = NSRange(location: 0, length: 0)
-    private var startedAt = Date()
+    private var fades: [Fade] = []
     private var timer: Timer?
 
     func start(in view: NSTextView, range: NSRange) {
-        stop()
         self.view = view
-        self.range = range
-        startedAt = Date()
-        apply(alpha: 0)
+        fades.append(Fade(range: range, startedAt: Date()))
+        apply(alpha: 0, to: range)
+        guard timer == nil else { return }
         let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
                 guard let self else { timer.invalidate(); return }
@@ -739,20 +745,37 @@ final class AppendedTextFade {
     func stop() {
         timer?.invalidate()
         timer = nil
-        guard let layoutManager = view?.layoutManager, let length = view?.textStorage?.length else { return }
-        let clamped = NSIntersectionRange(range, NSRange(location: 0, length: length))
-        if clamped.length > 0 { layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: clamped) }
+        for fade in fades { clear(fade.range) }
+        fades.removeAll()
         view = nil
     }
 
-    private func tick() {
-        let progress = Date().timeIntervalSince(startedAt) / StreamingFade.duration
-        guard progress < 1 else { stop(); return }
-        // Ease out, matching the SwiftUI segment fade.
-        apply(alpha: 1 - pow(1 - progress, 2))
+    /// Reapplies running fades after the storage was edited, so replaced
+    /// characters do not draw at full alpha until the next tick.
+    func refresh() {
+        guard !fades.isEmpty else { return }
+        tick()
     }
 
-    private func apply(alpha: CGFloat) {
+    private func tick() {
+        let now = Date()
+        fades.removeAll { fade in
+            let progress = now.timeIntervalSince(fade.startedAt) / StreamingFade.duration
+            guard progress < 1 else { clear(fade.range); return true }
+            // Ease out, matching the SwiftUI segment fade.
+            apply(alpha: 1 - pow(1 - progress, 2), to: fade.range)
+            return false
+        }
+        if fades.isEmpty { stop() }
+    }
+
+    private func clear(_ range: NSRange) {
+        guard let layoutManager = view?.layoutManager, let length = view?.textStorage?.length else { return }
+        let clamped = NSIntersectionRange(range, NSRange(location: 0, length: length))
+        if clamped.length > 0 { layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: clamped) }
+    }
+
+    private func apply(alpha: CGFloat, to range: NSRange) {
         guard let view, let layoutManager = view.layoutManager, let storage = view.textStorage else { return }
         let clamped = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
         guard clamped.length > 0 else { return }
