@@ -45,7 +45,7 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 - Background jobs stay visible while running, with results linked back to the tool call
 - Detailed views of subagent runs
 - Optional display of the model's thinking traces
-- Attach images by pasting or dragging
+- Attach images by pasting or dragging; click images to zoom, pan, copy, or save the original
 - `@` completion for files and skills, and slash-command suggestions
 - Queue steering and follow-up messages while the agent works (Option-Up returns queued messages to the composer)
 - Context use shown as a ring around the send button; thinking level as rising bars you click to step

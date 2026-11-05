@@ -82,18 +82,28 @@ struct ImageAttachmentThumbnail: View {
     let style: Style
     @State private var image: NSImage?
     @State private var failed = false
+    @State private var showingViewer = false
 
     var body: some View {
-        Group {
-            if let image {
-                preview(image)
-            } else if style == .message && failed {
-                Label("Image unavailable", systemImage: "photo")
-                    .font(AppFonts.ui(12))
-                    .foregroundStyle(appTheme.muted)
-            } else {
-                placeholder
+        Button { showingViewer = true } label: {
+            Group {
+                if let image {
+                    preview(image)
+                } else if style == .message && failed {
+                    Label("Image unavailable", systemImage: "photo")
+                        .font(AppFonts.ui(12))
+                        .foregroundStyle(appTheme.muted)
+                } else {
+                    placeholder
+                }
             }
+        }
+        .buttonStyle(.plain)
+        .help("View \(attachment.name)")
+        .accessibilityLabel("View image: \(attachment.name)")
+        .sheet(isPresented: $showingViewer) {
+            ImageViewer(source: .attachment(attachment))
+                .environment(\.appTheme, appTheme)
         }
         .task(id: "\(attachment.id)-\(maxDimension)") {
             image = nil
@@ -169,23 +179,57 @@ struct MessageImagesView: View {
 struct ImagePreviewView: View {
     @Environment(\.appTheme) private var appTheme
     let path: String
+    @State private var thumbnail: NSImage?
+    @State private var failed = false
+    @State private var showingViewer = false
 
     var body: some View {
-        if let image = NSImage(contentsOfFile: path) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 760, maxHeight: 520, alignment: .leading)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .contextMenu {
-                    Button("Open") { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-                    Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
-                    Button("Copy Path") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(path, forType: .string)
-                    }
-                }
-                .help(path)
+        Button { showingViewer = true } label: {
+            if let thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 760, maxHeight: 520, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                Label(failed ? "Image unavailable" : "Loading image…", systemImage: "photo")
+                    .font(AppFonts.ui(12))
+                    .foregroundStyle(appTheme.muted)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("View image: \(URL(fileURLWithPath: path).lastPathComponent)")
+        .contextMenu {
+            Button("View Full Size") { showingViewer = true }
+            Button("Open") { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+            Button("Copy Path") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(path, forType: .string)
+            }
+        }
+        .help(path)
+        .sheet(isPresented: $showingViewer) {
+            ImageViewer(source: .file(path))
+                .environment(\.appTheme, appTheme)
+        }
+        .task(id: path) {
+            thumbnail = nil
+            failed = false
+            let path = path
+            let prepared = await Task.detached(priority: .userInitiated) { () -> CGImage? in
+                guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil) else { return nil }
+                let options: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 1520,
+                    kCGImageSourceShouldCacheImmediately: true
+                ]
+                return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+            }.value
+            guard !Task.isCancelled else { return }
+            thumbnail = prepared.map { NSImage(cgImage: $0, size: .zero) }
+            failed = prepared == nil
         }
     }
 }
