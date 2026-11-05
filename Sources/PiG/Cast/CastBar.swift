@@ -222,6 +222,7 @@ private struct CastTrailingControls: View {
                     .glowPresentationBackground()
             }
             TitlebarTerminalButton()
+            SessionStatisticsToolbarButton()
             SessionTreeToolbarButton()
             CustomActionsToolbarButton()
         }

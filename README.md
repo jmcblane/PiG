@@ -50,6 +50,7 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 - `@` completion for files and skills, and slash-command suggestions
 - Queue steering and follow-up messages while the agent works (Option-Up returns queued messages to the composer)
 - Context use shown as a ring around the send button; thinking level as rising bars you click to step
+- Session statistics popover for token usage, context, messages, and tool calls in pi chats
 - Claude subscription usage for `claude-bridge`, updated when Claude Code reports quota data (no separate Pi OAuth login required)
 
 ### Inline HTML controls

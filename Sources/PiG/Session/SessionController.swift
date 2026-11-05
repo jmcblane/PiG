@@ -1087,23 +1087,43 @@ final class SessionController: ObservableObject, Identifiable {
         }
     }
 
+    func fetchSessionStatistics() async throws -> SessionStatistics {
+        try await ensureRPC()
+        guard let rpc else { throw PiRPCClient.RPCError.notRunning }
+        return try await requestSessionStatistics(using: rpc)
+    }
+
+    private func requestSessionStatistics(using client: PiRPCClient) async throws -> SessionStatistics {
+        let generation = runtimeGeneration
+        let path = sessionPath
+        let response = try await client.command(["type": "get_session_stats"])
+        try Task.checkCancellation()
+        guard rpc === client, runtimeGeneration == generation, sessionPath == path else {
+            throw CancellationError()
+        }
+        guard let data = response["data"] as? [String: Any],
+              data["totalMessages"] is Int || data["tokens"] is [String: Any] else {
+            throw PiRPCClient.RPCError.commandFailed("Session statistics are unavailable from this backend.")
+        }
+        return SessionStatistics(data)
+    }
+
     private func handleSessionSlash() async -> Bool {
         await withSlashRPC { rpc in
-            let response = try await rpc.command(["type": "get_session_stats"])
-            guard let data = response["data"] as? [String: Any] else { return false }
-            let tokens = data["tokens"] as? [String: Any]
-            let usage = data["contextUsage"] as? [String: Any]
+            let stats = try await requestSessionStatistics(using: rpc)
+            let display = SessionStatistics.display
+            let percent = stats.contextPercent.map { String(format: "%.1f%%", $0) } ?? "Unavailable"
             let lines = [
                 "**Session Info**",
                 "",
                 "Name: `\(title)`",
-                "File: `\(sessionPath ?? data["sessionFile"] as? String ?? "In-memory")`",
-                "ID: `\(data["sessionId"] as? String ?? "unknown")`",
+                "File: `\(sessionPath ?? stats.sessionFile ?? "In-memory")`",
+                "ID: `\(stats.sessionID ?? "unknown")`",
                 "",
-                "Messages: `\(data["totalMessages"] ?? 0)` total, `\(data["userMessages"] ?? 0)` user, `\(data["assistantMessages"] ?? 0)` assistant",
-                "Tool calls: `\(data["toolCalls"] ?? 0)`",
-                "Tokens: `\(tokens?["total"] ?? 0)` total (`\(tokens?["input"] ?? 0)` in, `\(tokens?["output"] ?? 0)` out)",
-                "Context: `\(usage?["tokens"] ?? 0)` / `\(usage?["contextWindow"] ?? 0)` (`\(usage?["percent"] ?? 0)%`)"
+                "Messages: `\(display(stats.totalMessages))` total, `\(display(stats.userMessages))` user, `\(display(stats.assistantMessages))` assistant",
+                "Tool calls: `\(display(stats.toolCalls))`",
+                "Tokens: `\(display(stats.totalTokens))` total (`\(display(stats.inputTokens))` in, `\(display(stats.outputTokens))` out)",
+                "Context: `\(display(stats.contextTokens))` / `\(display(stats.contextWindow))` (`\(percent)`)",
             ]
             addSystemNotice(lines.joined(separator: "\n"))
             return true
@@ -1702,13 +1722,10 @@ final class SessionController: ObservableObject, Identifiable {
             if let compacting = data["isCompacting"] as? Bool { isCompacting = compacting }
             clearRecoveredError(.liveUpdates, id: recoveringErrorID)
         }
-        if let statsResponse = try? await rpc.command(["type": "get_session_stats"]),
-           let data = statsResponse["data"] as? [String: Any],
-           let usage = data["contextUsage"] as? [String: Any] {
-            contextTokens = usage["tokens"] as? Int
-            contextWindow = usage["contextWindow"] as? Int
-            if let percent = usage["percent"] as? Double { contextPercent = percent }
-            else if let percent = usage["percent"] as? Int { contextPercent = Double(percent) }
+        if let stats = try? await requestSessionStatistics(using: rpc) {
+            contextTokens = stats.contextTokens
+            contextWindow = stats.contextWindow
+            contextPercent = stats.contextPercent
         }
         if wasActive != showsActivityIndicator { eventHandler(.activityChanged) }
         updateRecoveryTimer()
