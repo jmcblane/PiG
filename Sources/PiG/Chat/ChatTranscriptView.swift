@@ -731,7 +731,7 @@ struct ChatMessageRow: View, Equatable {
     }
 
     private var copyButton: some View {
-        Button(action: copyMessage) {
+        Button { copyMessage() } label: {
             Image(systemName: copied ? "checkmark" : "doc.on.doc")
                 .font(AppFonts.ui(11, weight: .semibold))
                 .foregroundStyle(copied ? appTheme.good : appTheme.muted)
@@ -750,9 +750,15 @@ struct ChatMessageRow: View, Equatable {
         .opacity(hovering || copied ? 1 : 0)
         .allowsHitTesting(hovering || copied)
         .animation(.easeInOut(duration: 0.12), value: hovering)
-        .help(copied ? "Copied" : "Copy message")
-        .accessibilityLabel("Copy message")
+        .help(copied ? "Copied" : (message.role == .assistant ? "Copy plain text — right-click for Markdown" : "Copy message"))
+        .accessibilityLabel(message.role == .assistant ? "Copy plain text" : "Copy message")
         .accessibilityValue(copied ? "Copied" : "")
+        .contextMenu {
+            if message.role == .assistant {
+                Button("Copy Plain Text") { copyMessage() }
+                Button("Copy Markdown") { copyMessage(asMarkdown: true) }
+            }
+        }
     }
 
     /// Faint duration on the latest turn; older turns show it on hover.
@@ -823,7 +829,7 @@ struct ChatMessageRow: View, Equatable {
         Task { await target.sendHTMLWidgetMessage(text) }
     }
 
-    private func copyMessage() {
+    private func copyMessage(asMarkdown: Bool = false) {
         NSPasteboard.general.clearContents()
         var copiedText: String
         if let canonicalText = message.canonicalText {
@@ -832,8 +838,19 @@ struct ChatMessageRow: View, Equatable {
             let references = message.references.map(\.plainText).joined(separator: " ")
             copiedText = [references, message.text].filter { !$0.isEmpty }.joined(separator: references.isEmpty ? "" : "\n")
         }
-        for artifact in htmlArtifacts.values {
-            copiedText = copiedText.replacingOccurrences(of: artifact.marker, with: "[\(artifact.title)]")
+        if message.role == .assistant && !asMarkdown {
+            copiedText = MarkdownPlainText.render(copiedText)
+            for artifact in htmlArtifacts.values {
+                copiedText = copiedText.replacingOccurrences(of: artifact.marker, with: artifact.title)
+            }
+            copiedText = copiedText.replacingOccurrences(
+                of: #"\[\[pig-ui:[a-f0-9]{16}\]\]"#,
+                with: "Interactive controls", options: .regularExpression
+            )
+        } else {
+            for artifact in htmlArtifacts.values {
+                copiedText = copiedText.replacingOccurrences(of: artifact.marker, with: "[\(artifact.title)]")
+            }
         }
         NSPasteboard.general.setString(copiedText, forType: .string)
         copied = true

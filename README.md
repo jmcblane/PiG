@@ -41,6 +41,7 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 ### Chat & composer
 
 - Markdown rendering with syntax-highlighted code previews
+- Copy assistant replies as plain text; right-click the copy button to keep Markdown instead
 - Tool activity groups that expand to show commands and file reads
 - Background jobs stay visible while running, with results linked back to the tool call
 - Detailed views of subagent runs
