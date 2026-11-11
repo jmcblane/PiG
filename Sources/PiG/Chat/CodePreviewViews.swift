@@ -2,6 +2,81 @@ import SwiftUI
 import AppKit
 import ImageIO
 
+struct ToolBodyStyle: ViewModifier {
+    @Environment(\.appTheme) private var appTheme
+    var padding: CGFloat = 10
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(appTheme.panel2.opacity(0.36)))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(appTheme.line.opacity(0.5), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+extension View {
+    func toolBodyStyle(padding: CGFloat = 10) -> some View {
+        modifier(ToolBodyStyle(padding: padding))
+    }
+}
+
+struct CopyButton: View {
+    let label: String
+    let text: () -> String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text(), forType: .string)
+            copied = true
+        } label: {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+        }
+        .buttonStyle(InlineIconButtonStyle())
+        .help(copied ? "Copied" : label)
+        .accessibilityLabel(copied ? "Copied" : label)
+        .accessibilityValue(copied ? "Copied" : "")
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            copied = false
+        }
+    }
+}
+
+struct ToolLinkButton: View {
+    @Environment(\.appTheme) private var appTheme
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(AppFonts.ui(11.5, weight: .medium))
+                .foregroundStyle(appTheme.brass)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+}
+
+struct CappedHeight: Layout {
+    let maxHeight: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let natural = subview.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        return CGSize(width: proposal.width ?? natural.width, height: min(natural.height, maxHeight))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+    }
+}
+
 struct EditDiffView: View {
     @Environment(\.appTheme) private var appTheme
     let diff: EditDiffSummary
@@ -16,8 +91,7 @@ struct EditDiffView: View {
                 }
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(appTheme.panel2.opacity(0.36)))
+        .toolBodyStyle()
     }
 }
 
@@ -45,8 +119,7 @@ struct CodePreviewView: View {
                 }
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(appTheme.panel2.opacity(0.36)))
+        .toolBodyStyle()
     }
 
     private func hiddenLineText(_ direction: String) -> CodePreviewLine {

@@ -504,6 +504,7 @@ enum MarkdownPrewarmer {
 }
 
 struct NativeMarkdownView: View {
+    var findHighlights: ChatFindMessageHighlights? = nil
     let markdown: String
     let role: MessageRole
     let theme: AppThemeChoice
@@ -547,6 +548,32 @@ struct NativeMarkdownView: View {
         }
     }
 
+    static func findTexts(markdown: String, role: MessageRole, theme: AppThemeChoice,
+                          projectPath: String?, isStreaming: Bool) -> [(ChatFindTextKey, String)] {
+        let prepared = PreparedNativeMarkdownCache.shared.prepared(
+            markdown: markdown, role: role, theme: theme, projectPath: projectPath, cacheable: !isStreaming
+        )
+        var texts: [(ChatFindTextKey, String)] = []
+        for (index, segment) in prepared.segments.enumerated() {
+            switch segment {
+            case .text:
+                if let text = prepared.attributedText[index] {
+                    texts.append((ChatFindTextKey(segment: index), text.attributed.string))
+                }
+            case .code(let code, _):
+                texts.append((ChatFindTextKey(segment: index), code))
+            case .table(let header, let rows):
+                for (cell, source) in ((header ?? []) + rows.flatMap { $0 }).enumerated() {
+                    let rendered = prepared.attributedTableCells[source] ?? AttributedString(source)
+                    texts.append((ChatFindTextKey(segment: index, cell: cell), String(rendered.characters)))
+                }
+            case .htmlWidget:
+                break
+            }
+        }
+        return texts
+    }
+
     private var bodyColor: Color {
         role == .user
             ? theme.palette.markdown.userForeground.color
@@ -557,10 +584,12 @@ struct NativeMarkdownView: View {
         switch segment {
         case .text:
             if let text = prepared.attributedText[index] {
-                SelectableMarkdownText(text: text, hugsWidth: hugsWidth, fadesAppendedText: fadesIn)
+                SelectableMarkdownText(text: text, findHighlights: findHighlights?.texts[ChatFindTextKey(segment: index)],
+                                       hugsWidth: hugsWidth, fadesAppendedText: fadesIn)
             }
         case .code(let code, let language):
-            NativeCodeBlockView(code: code, language: language, theme: theme, textStyle: textStyle)
+            NativeCodeBlockView(code: code, language: language, theme: theme, textStyle: textStyle,
+                                findHighlights: findHighlights?.texts[ChatFindTextKey(segment: index)])
         case .htmlWidget(let reference):
             if role == .assistant, let artifact = htmlArtifacts[reference] {
                 HTMLArtifactView(artifact: artifact, theme: theme, textStyle: textStyle, onSendMessage: onSendHTMLMessage)
@@ -570,17 +599,18 @@ struct NativeMarkdownView: View {
                     .foregroundStyle(theme.palette.muted.color)
             }
         case .table(let header, let rows):
-            tableView(header: header, rows: rows, prepared: prepared, palette: palette)
+            tableView(header: header, rows: rows, prepared: prepared, palette: palette, segment: index)
         }
     }
 
-    private func tableView(header: [String]?, rows: [[String]], prepared: PreparedNativeMarkdown, palette: MarkdownThemePalette) -> some View {
+    private func tableView(header: [String]?, rows: [[String]], prepared: PreparedNativeMarkdown, palette: MarkdownThemePalette, segment: Int) -> some View {
         let border = palette.codeBorder.color
         return Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
             if let header {
                 GridRow {
                     ForEach(header.indices, id: \.self) { column in
-                        tableCell(prepared.attributedTableCells[header[column]] ?? AttributedString(header[column]), color: palette.strong.color, weight: .semibold)
+                        tableCell(prepared.attributedTableCells[header[column]] ?? AttributedString(header[column]), color: palette.strong.color, weight: .semibold,
+                                  highlights: findHighlights?.texts[ChatFindTextKey(segment: segment, cell: column)])
                             .background(palette.tableHeaderBackground.color)
                             .border(border, width: 0.5)
                     }
@@ -589,7 +619,8 @@ struct NativeMarkdownView: View {
             ForEach(rows.indices, id: \.self) { rowIndex in
                 GridRow {
                     ForEach(rows[rowIndex].indices, id: \.self) { column in
-                        tableCell(prepared.attributedTableCells[rows[rowIndex][column]] ?? AttributedString(rows[rowIndex][column]), color: bodyColor)
+                        tableCell(prepared.attributedTableCells[rows[rowIndex][column]] ?? AttributedString(rows[rowIndex][column]), color: bodyColor,
+                                  highlights: findHighlights?.texts[ChatFindTextKey(segment: segment, cell: (header?.count ?? 0) + rows.prefix(rowIndex).reduce(0) { $0 + $1.count } + column)])
                             .background(rowIndex % 2 == 1 ? palette.evenRowBackground.color : Color.clear)
                             .border(border, width: 0.5)
                     }
@@ -599,15 +630,46 @@ struct NativeMarkdownView: View {
         .overlay(Rectangle().stroke(border, lineWidth: 1))
     }
 
-    private func tableCell(_ text: AttributedString, color: Color, weight: Font.Weight = .regular) -> some View {
-        Text(text)
-            .font(AppFonts.ui(13, weight: weight))
-            .foregroundStyle(color)
-            .textSelection(.enabled)
+    private func tableCell(_ text: AttributedString, color: Color, weight: Font.Weight = .regular,
+                           highlights: ChatFindTextHighlights? = nil) -> some View {
+        Group {
+            if let highlights {
+                SelectableMarkdownText(text: tableFindText(text, color: color, weight: weight), findHighlights: highlights)
+            } else {
+                Text(text)
+                    .font(AppFonts.ui(13, weight: weight))
+                    .foregroundStyle(color)
+                    .textSelection(.enabled)
+            }
+        }
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func tableFindText(_ text: AttributedString, color: Color, weight: Font.Weight) -> MarkdownAttributedText {
+        let attributed = NSMutableAttributedString(attributedString: NSAttributedString(text))
+        var offset = 0
+        for run in text.runs {
+            let length = String(text.characters[run.range]).utf16.count
+            let range = NSRange(location: offset, length: length)
+            let intent = run.inlinePresentationIntent ?? []
+            var font = AppFonts.nsUI(13, weight: weight == .semibold ? .semibold : .regular)
+            if intent.contains(.stronglyEmphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) }
+            if intent.contains(.emphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
+            if intent.contains(.code) { font = AppFonts.nsCode(MarkdownTypography.codeSize) }
+            attributed.addAttribute(.font, value: font, range: range)
+            attributed.addAttribute(.foregroundColor, value: NSColor(run.foregroundColor ?? color), range: range)
+            if intent.contains(.strikethrough) {
+                attributed.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+            }
+            if let background = run.backgroundColor {
+                attributed.addAttribute(.backgroundColor, value: NSColor(background), range: range)
+            }
+            offset += length
+        }
+        return MarkdownAttributedText(attributed: attributed, stablePrefixLength: 0, styleKey: 0)
     }
 }
 
@@ -658,16 +720,28 @@ struct NativeCodeBlockView: View {
     var language: String?
     let theme: AppThemeChoice
     var textStyle: TextStyle = .current
+    var findHighlights: ChatFindTextHighlights? = nil
     @State private var hovering = false
     @State private var copied = false
 
     var body: some View {
         let palette = theme.palette.markdown
-        Text(code)
-            .font(AppFonts.code(MarkdownTypography.codeSize))
-            .foregroundStyle(palette.assistantForeground.color)
-            .multilineTextAlignment(.leading)
-            .textSelection(.enabled)
+        Group {
+            if let findHighlights {
+                let attributed = NSAttributedString(string: code, attributes: [
+                    .font: AppFonts.nsCode(MarkdownTypography.codeSize),
+                    .foregroundColor: palette.assistantForeground.nsColor
+                ])
+                SelectableMarkdownText(text: MarkdownAttributedText(attributed: attributed, stablePrefixLength: 0, styleKey: 0),
+                                       findHighlights: findHighlights)
+            } else {
+                Text(code)
+                    .font(AppFonts.code(MarkdownTypography.codeSize))
+                    .foregroundStyle(palette.assistantForeground.color)
+                    .multilineTextAlignment(.leading)
+                    .textSelection(.enabled)
+            }
+        }
             // Allow the proposed width to soft-wrap at word boundaries.
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

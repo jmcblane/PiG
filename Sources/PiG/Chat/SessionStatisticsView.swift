@@ -1,37 +1,6 @@
 import SwiftUI
 
-struct SessionStatisticsToolbarButton: View {
-    @EnvironmentObject private var model: AppModel
-    @State private var showing = false
-
-    var body: some View {
-        Button { showing.toggle() } label: {
-            Image(systemName: "chart.bar.xaxis")
-        }
-        .buttonStyle(TitlebarIconButtonStyle(active: showing))
-        .help("Session statistics")
-        .accessibilityLabel("Session statistics")
-        .disabled(model.selectedController == nil && model.selectedHermesController == nil)
-        .popover(isPresented: $showing, arrowEdge: .bottom) {
-            Group {
-                if let controller = model.selectedController {
-                    SessionStatisticsView(controller: controller)
-                        .id(controller.id + (controller.sessionPath ?? ""))
-                } else {
-                    Text("Session statistics are unavailable for Hermes chats.")
-                        .font(AppFonts.ui(12.5))
-                        .padding(16)
-                        .frame(width: 300)
-                }
-            }
-            .glowPresentationBackground()
-        }
-        .onChange(of: model.selectedControllerID) { _, _ in showing = false }
-        .onChange(of: model.selectedHermesChatID) { _, _ in showing = false }
-    }
-}
-
-private struct SessionStatisticsView: View {
+struct SessionStatisticsView: View {
     @Environment(\.appTheme) private var appTheme
     @ObservedObject var controller: SessionController
     @State private var statistics: SessionStatistics?
@@ -120,7 +89,7 @@ private struct SessionStatisticsView: View {
             if let count = stats.cacheReadTokens, count > 0 { row("Cache read", count) }
             if let count = stats.cacheWriteTokens, count > 0 { row("Cache written", count) }
             row("Total tokens", stats.totalTokens, emphasized: true)
-                .help("Cumulative session usage, including cached tokens; not the current context size.")
+                .help("Cumulative chat usage, including cached tokens; not the current context size.")
         }
         divider
         VStack(alignment: .leading, spacing: 5) {

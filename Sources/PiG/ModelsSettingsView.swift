@@ -28,7 +28,7 @@ struct ModelsSettingsView: View {
     }
 
     private var newSessionsSection: some View {
-        GlowSection("New Sessions") {
+        GlowSection("New Chats") {
             GlowRow("Default") {
                 GlowSegmented(selection: $model.newSessionModelMode, options: NewSessionModelMode.allCases, label: { $0.title })
             }
@@ -132,10 +132,10 @@ struct ModelsSettingsView: View {
     }
 
     private var sessionNamingSection: some View {
-        GlowSection("Session Naming") {
+        GlowSection("Chat Naming") {
             GlowBlockRow {
                 Toggle(isOn: $model.automaticSessionNamingEnabled) {
-                    Text("Automatically name new sessions")
+                    Text("Automatically name new chats")
                         .font(AppFonts.ui(13))
                         .foregroundStyle(appTheme.text)
                 }
@@ -372,7 +372,7 @@ private struct ScheduleStatus: View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let activeID = DefaultModelSchedule.effectiveModelID(at: context.date) ?? "Not selected"
             let activeName = models.first(where: { $0.id == activeID })?.displayName ?? activeID
-            GlowRow("Active for new sessions") {
+            GlowRow("Active for new chats") {
                 Text(activeName)
                     .font(AppFonts.ui(12.5))
                     .foregroundStyle(appTheme.secondaryText)

@@ -1,12 +1,13 @@
 import SwiftUI
 import AppKit
-import ImageIO
 
 private enum SubagentRunStatus: Hashable {
     case queued
     case running
     case succeeded
     case failed
+
+    var isFinished: Bool { self == .succeeded || self == .failed }
 }
 
 private enum SubagentOutputKind: Hashable {
@@ -18,28 +19,36 @@ private struct SubagentOutputItem: Identifiable, Hashable {
     let id: Int
     let kind: SubagentOutputKind
     let text: String
-    var bashCommand: String? = nil
+    var toolName: String? = nil
+    var detail: String? = nil
+}
+
+private struct SubagentUsage: Hashable {
+    let input: Int
+    let output: Int
+
+    var label: String { "↑\(Self.tokens(input)) ↓\(Self.tokens(output))" }
+
+    private static func tokens(_ value: Int) -> String {
+        if value < 1000 { return "\(value)" }
+        if value < 10_000 { return String(format: "%.1fk", Double(value) / 1000) }
+        if value < 1_000_000 { return "\(value / 1000)k" }
+        return String(format: "%.1fM", Double(value) / 1_000_000)
+    }
 }
 
 private struct SubagentRun: Identifiable, Hashable {
     let id: String
     let name: String
+    let model: String?
     let prompt: String
     let parameters: [String]
-    let output: [SubagentOutputItem]
+    let activity: [SubagentOutputItem]
+    let result: String?
+    let error: String?
+    let usage: SubagentUsage?
     let status: SubagentRunStatus
-
-    var outputSignature: Int {
-        var hasher = Hasher()
-        hasher.combine(output)
-        hasher.combine(status)
-        return hasher.finalize()
-    }
-}
-
-private struct SubagentLane: Identifiable, Hashable {
-    let id: Int
-    let runs: [SubagentRun]
+    let liveText: String
 }
 
 private struct SubagentPresentation: @unchecked Sendable {
@@ -50,97 +59,78 @@ private struct SubagentPresentation: @unchecked Sendable {
     }
 
     let mode: Mode
-    let lanes: [SubagentLane]
-
-    var runs: [SubagentRun] { lanes.flatMap(\.runs) }
-    var hasNestedChain: Bool { mode == .parallel && lanes.contains { $0.runs.count > 1 } }
-
-    var preferredRunID: String? {
-        runs.first(where: { $0.status == .running })?.id ?? runs.first?.id
-    }
-
-    var progressSignature: String {
-        lanes.map { lane in
-            lane.runs.map { "\($0.id):\($0.status)" }.joined(separator: ",")
-        }.joined(separator: "|")
-    }
+    let runs: [SubagentRun]
 
     init(tool: ToolDisplay) {
         let args = tool.argumentsObject ?? [:]
         let details = Self.jsonObject(tool.details)
-        let flatResults = details?["results"] as? [[String: Any]] ?? []
-        let detailLanes = details?["lanes"] as? [[String: Any]]
+        let results = details?["results"] as? [[String: Any]] ?? []
 
         let resolvedMode: Mode
-        let specLanes: [[[String: Any]]]
+        let specs: [[String: Any]]
         if let chain = args["chain"] as? [[String: Any]], !chain.isEmpty {
             resolvedMode = .chain
-            specLanes = [chain]
+            specs = chain
         } else if let tasks = args["tasks"] as? [[String: Any]], !tasks.isEmpty {
             resolvedMode = .parallel
-            specLanes = tasks.map { item in
-                if let nested = item["chain"] as? [[String: Any]], !nested.isEmpty { return nested }
-                return [item]
-            }
+            specs = tasks
         } else if details?["mode"] as? String == "chain" {
             resolvedMode = .chain
-            specLanes = [[]]
+            specs = []
         } else if details?["mode"] as? String == "parallel" {
             resolvedMode = .parallel
-            specLanes = []
+            specs = []
         } else {
             resolvedMode = .single
-            specLanes = tool.shortName == "subagent"
+            specs = tool.shortName == "subagent"
                 && (args["task"] as? String)?.nonEmptyTrimmed != nil
-                && (details == nil || details?["mode"] as? String == "single") ? [[args]] : []
+                && (details == nil || details?["mode"] as? String == "single") ? [args] : []
         }
         mode = resolvedMode
 
-        let resultLanes: [[[String: Any]]]
-        if let detailLanes, !detailLanes.isEmpty {
-            resultLanes = detailLanes.map { ($0["results"] as? [[String: Any]]) ?? [] }
-        } else if resolvedMode == .parallel, specLanes.contains(where: { $0.count > 1 }) {
-            resultLanes = specLanes.map { _ in [] }
-        } else if resolvedMode == .parallel {
-            resultLanes = flatResults.map { [$0] }
-        } else {
-            resultLanes = [flatResults]
-        }
-
         let fallbackToToolResult = resolvedMode == .single && details == nil && !tool.result.isEmpty
-        let laneCount = max(specLanes.count, resultLanes.count)
-        lanes = (0..<laneCount).compactMap { laneIndex in
-            let specs = laneIndex < specLanes.count ? specLanes[laneIndex] : []
-            let results = laneIndex < resultLanes.count ? resultLanes[laneIndex] : []
-            let count = max(specs.count, results.count)
-            guard count > 0 else { return nil }
-            let nested = resolvedMode == .parallel && count > 1
-            let runs = (0..<count).map { stepIndex in
-                let spec = stepIndex < specs.count ? specs[stepIndex] : [:]
-                let result = stepIndex < results.count ? results[stepIndex] : nil
-                let fallbackName = nested || resolvedMode == .chain ? "step-\(stepIndex + 1)" : "subagent"
-                let name = (result?["agent"] as? String)?.nonEmptyTrimmed
-                    ?? (spec["agent"] as? String)?.nonEmptyTrimmed
-                    ?? fallbackName
-                let output = Self.outputItems(result?["messages"])
-                return SubagentRun(
-                    id: "\(laneIndex).\(stepIndex)",
-                    name: name,
-                    prompt: (result?["task"] as? String) ?? (spec["task"] as? String) ?? "",
-                    parameters: Self.parameters(spec),
-                    output: output.isEmpty && fallbackToToolResult
-                        ? [SubagentOutputItem(id: 0, kind: .text, text: tool.result)]
-                        : output,
-                    status: Self.status(
-                        mode: resolvedMode,
-                        index: stepIndex,
-                        resultCount: results.count,
-                        result: result,
-                        toolStatus: tool.status
-                    )
-                )
+        let count = resolvedMode == .single ? min(1, max(specs.count, results.count)) : max(specs.count, results.count)
+        runs = (0..<count).map { index in
+            let spec = index < specs.count ? specs[index] : [:]
+            let result = index < results.count ? results[index] : nil
+            let fallbackName = resolvedMode == .chain ? "step-\(index + 1)" : "subagent"
+            let name = (result?["agent"] as? String)?.nonEmptyTrimmed
+                ?? (spec["agent"] as? String)?.nonEmptyTrimmed
+                ?? fallbackName
+            let status = Self.status(
+                mode: resolvedMode,
+                index: index,
+                resultCount: results.count,
+                result: result,
+                toolStatus: tool.status
+            )
+            var activity = Self.outputItems(result?["messages"])
+            var finalText: String?
+            if status == .succeeded, let last = activity.last, last.kind == .text {
+                finalText = last.text
+                activity.removeLast()
             }
-            return SubagentLane(id: laneIndex, runs: runs)
+            var error: String?
+            if status == .failed {
+                error = (result?["errorMessage"] as? String)?.nonEmptyTrimmed
+                    ?? (result?["stderr"] as? String)?.nonEmptyTrimmed
+            }
+            if activity.isEmpty && finalText == nil && fallbackToToolResult {
+                if status == .failed { error = error ?? tool.result.nonEmptyTrimmed } else { finalText = tool.result }
+            }
+            return SubagentRun(
+                id: resolvedMode == .parallel ? "\(index).0" : "0.\(index)",
+                name: name,
+                model: (result?["model"] as? String)?.nonEmptyTrimmed ?? (spec["model"] as? String)?.nonEmptyTrimmed,
+                prompt: (result?["task"] as? String) ?? (spec["task"] as? String) ?? "",
+                parameters: Self.parameters(spec),
+                activity: activity,
+                result: finalText,
+                error: error,
+                usage: Self.usage(result?["usage"]),
+                status: status,
+                liveText: Self.liveText(status: status, activity: activity, result: finalText, error: error)
+            )
         }
     }
 
@@ -164,6 +154,39 @@ private struct SubagentPresentation: @unchecked Sendable {
     private static func appendParameter(_ label: String, _ value: Any?, to values: inout [String]) {
         guard let value else { return }
         values.append("\(label) \(String(describing: value))")
+    }
+
+    private static func usage(_ value: Any?) -> SubagentUsage? {
+        guard let usage = value as? [String: Any] else { return nil }
+        let input = (usage["input"] as? NSNumber)?.intValue ?? 0
+        let output = (usage["output"] as? NSNumber)?.intValue ?? 0
+        guard input > 0 || output > 0 else { return nil }
+        return SubagentUsage(input: input, output: output)
+    }
+
+    private static func liveText(
+        status: SubagentRunStatus,
+        activity: [SubagentOutputItem],
+        result: String?,
+        error: String?
+    ) -> String {
+        switch status {
+        case .queued:
+            return "Queued"
+        case .running:
+            guard let latest = activity.last else { return "Starting" }
+            if latest.kind == .tool { return latest.text.oneLine(max: 160) }
+            let line = latest.text.split(whereSeparator: \.isNewline).last { !$0.allSatisfy(\.isWhitespace) }
+            return line.map { String($0).oneLine(max: 160) } ?? "Working"
+        case .succeeded:
+            guard let result else { return "Finished with no output" }
+            let plain = MarkdownPlainText.render(String(result.prefix(800)))
+            let line = plain.split(whereSeparator: \.isNewline).first { !$0.allSatisfy(\.isWhitespace) }
+            return line.map { String($0).oneLine(max: 160) } ?? "Finished with no output"
+        case .failed:
+            let line = error?.split(whereSeparator: \.isNewline).first { !$0.allSatisfy(\.isWhitespace) }
+            return line.map { String($0).oneLine(max: 160) } ?? "Failed"
+        }
     }
 
     private static func status(
@@ -221,20 +244,20 @@ private struct SubagentPresentation: @unchecked Sendable {
             for block in blocks {
                 switch block["type"] as? String {
                 case "text":
-                    if let text = block["text"] as? String, !text.isEmpty {
+                    if let text = block["text"] as? String, text.nonEmptyTrimmed != nil {
                         items.append(SubagentOutputItem(id: items.count, kind: .text, text: text))
                     }
                 case "toolCall":
                     let name = block["name"] as? String ?? "tool"
+                    let shortName = name.split(separator: ".").last.map(String.init) ?? name
                     let args = block["arguments"] as? [String: Any] ?? [:]
-                    let command = name.split(separator: ".").last == "bash"
-                        ? (args["command"] as? String)?.nonEmptyTrimmed
-                        : nil
+                    let command = shortName == "bash" ? (args["command"] as? String)?.nonEmptyTrimmed : nil
                     items.append(SubagentOutputItem(
                         id: items.count,
                         kind: .tool,
-                        text: toolTitle(name: name, args: args),
-                        bashCommand: command
+                        text: toolTitle(name: shortName, args: args),
+                        toolName: shortName,
+                        detail: command
                     ))
                 default:
                     continue
@@ -245,200 +268,234 @@ private struct SubagentPresentation: @unchecked Sendable {
     }
 
     private static func toolTitle(name: String, args: [String: Any]) -> String {
-        let shortName = name.split(separator: ".").last.map(String.init) ?? name
-        switch shortName {
+        let path = (args["path"] as? String) ?? (args["file_path"] as? String) ?? "file"
+        switch name {
         case "bash":
             return (args["description"] as? String)?.nonEmptyTrimmed
-                ?? (args["command"] as? String)?.nonEmptyTrimmed
+                ?? (args["command"] as? String)?.nonEmptyTrimmed?.oneLine(max: 200)
                 ?? "Run shell command"
         case "read":
-            return "read \((args["path"] as? String) ?? (args["file_path"] as? String) ?? "file")"
+            return "Read \(path)"
         case "write":
-            return "write \((args["path"] as? String) ?? (args["file_path"] as? String) ?? "file")"
+            return "Write \(path)"
         case "edit":
-            return "edit \((args["path"] as? String) ?? (args["file_path"] as? String) ?? "file")"
+            return "Edit \(path)"
         default:
-            return ToolDisplay.genericTitle(name: shortName, args: args)
+            return ToolDisplay.genericTitle(name: name, args: args)
         }
     }
 }
 
-/// Renders the task/tasks/chain arguments and mode/results/lanes details from
+@MainActor
+private enum SubagentRunClock {
+    private static var starts: [String: Date] = [:]
+    private static var ends: [String: Date] = [:]
+
+    static func observe(_ key: String, status: SubagentRunStatus) {
+        switch status {
+        case .running:
+            if starts[key] == nil { starts[key] = Date() }
+        case .succeeded, .failed:
+            if starts[key] != nil, ends[key] == nil { ends[key] = Date() }
+        case .queued:
+            break
+        }
+    }
+
+    static func start(_ key: String) -> Date? { starts[key] }
+    static func end(_ key: String) -> Date? { ends[key] }
+}
+
+/// Renders the task/tasks/chain arguments and mode/results details from
 /// ~/.pi/agent/extensions/subagent/index.ts; other tool shapes use the fallback view.
 struct SubagentToolDetailsView: View {
     @Environment(\.appTheme) private var appTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let tool: ToolDisplay
-    @State private var selectedRunID: String?
-
-    private var presentation: SubagentPresentation { SubagentPresentation(tool: tool) }
+    let projectPath: String?
+    @State private var presentation: SubagentPresentation?
+    @State private var cardOverrides: [String: Bool] = [:]
+    @State private var finishedWhileShown: Set<String> = []
 
     var body: some View {
-        let presentation = presentation
-        let selected = presentation.runs.first(where: { $0.id == selectedRunID })
-            ?? presentation.runs.first(where: { $0.id == presentation.preferredRunID })
-            ?? presentation.runs.first
-
-        Group {
-            if let selected {
-                HStack(alignment: .top, spacing: 0) {
-                    if presentation.runs.count > 1 {
-                        rail(selected: selected, presentation: presentation)
-                    }
-                    runDetails(selected)
+        VStack(alignment: .leading, spacing: 0) {
+            if let presentation {
+                if presentation.runs.isEmpty {
+                    FallbackToolDetailsView(tool: tool)
+                } else {
+                    cards(presentation)
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(appTheme.panel2.opacity(0.36))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .stroke(appTheme.line.opacity(0.58), lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            } else {
-                FallbackToolDetailsView(tool: tool)
             }
         }
         .frame(maxWidth: 760, alignment: .leading)
-        .onAppear { syncSelection(in: presentation) }
-        .onChange(of: presentationTaskID) { _, _ in syncSelection(in: presentation) }
-        .onChange(of: presentation.progressSignature) { _, _ in followSelectedLane(in: presentation) }
+        .task(id: presentationTaskID) {
+            let tool = tool
+            let value = await Task.detached(priority: .utility) {
+                SubagentPresentation(tool: tool)
+            }.value
+            guard !Task.isCancelled else { return }
+            observe(value)
+            presentation = value
+        }
     }
 
     private var presentationTaskID: String {
         "\(tool.id)|\(tool.status.rawValue)|\(tool.arguments.count)|\(tool.result.count)|\(tool.details?.count ?? 0)"
     }
 
-    private func syncSelection(in presentation: SubagentPresentation) {
-        if selectedRunID.map({ id in presentation.runs.contains(where: { $0.id == id }) }) != true {
-            selectedRunID = presentation.preferredRunID
-        }
-        followSelectedLane(in: presentation)
-    }
+    private func clockKey(_ run: SubagentRun) -> String { "\(tool.id)#\(run.id)" }
 
-    private func followSelectedLane(in presentation: SubagentPresentation) {
-        guard let selectedRunID,
-              let lane = presentation.lanes.first(where: { $0.runs.contains { $0.id == selectedRunID } }),
-              lane.runs.count > 1,
-              let running = lane.runs.first(where: { $0.status == .running })
-        else { return }
-        self.selectedRunID = running.id
-    }
-
-    private func rail(selected: SubagentRun, presentation: SubagentPresentation) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(presentation.lanes) { lane in
-                if presentation.mode == .parallel && lane.runs.count > 1 {
-                    chainLane(lane, selected: selected)
-                } else {
-                    ForEach(lane.runs) { run in
-                        railButton(run, selected: selected, stepLabel: nil, indented: false)
-                    }
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .frame(width: presentation.hasNestedChain ? 158 : 128)
-        .background(appTheme.panel.opacity(0.3))
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(appTheme.line.opacity(0.58)).frame(width: 1)
-        }
-    }
-
-    private func chainLane(_ lane: SubagentLane, selected: SubagentRun) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(lane.runs.enumerated()), id: \.element.id) { index, run in
-                railButton(
-                    run,
-                    selected: selected,
-                    stepLabel: "\(index + 1)/\(lane.runs.count)",
-                    indented: index > 0
-                )
+    private func observe(_ next: SubagentPresentation) {
+        let previous = Dictionary((presentation?.runs ?? []).map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first })
+        for run in next.runs {
+            SubagentRunClock.observe(clockKey(run), status: run.status)
+            if let before = previous[run.id], !before.isFinished, run.status.isFinished {
+                finishedWhileShown.insert(run.id)
             }
         }
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(appTheme.line.opacity(0.7))
-                .frame(width: 1)
-                .padding(.leading, 16)
-                .padding(.top, 22)
-                .padding(.bottom, 14)
-                .allowsHitTesting(false)
-        }
     }
 
-    private func railButton(
-        _ run: SubagentRun,
-        selected: SubagentRun,
-        stepLabel: String?,
-        indented: Bool
-    ) -> some View {
-        Button {
-            selectedRunID = run.id
-        } label: {
-            HStack(spacing: 8) {
-                ToolActivityIndicator(state: activityState(run.status))
-                Text(run.name)
-                    .font(AppFonts.ui(11.5, weight: .semibold))
-                    .foregroundStyle(run.id == selected.id ? appTheme.text : appTheme.muted)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if let stepLabel {
-                    Text(stepLabel)
-                        .font(AppFonts.code(10))
-                        .foregroundStyle(appTheme.muted)
+    private func isExpanded(_ run: SubagentRun, in presentation: SubagentPresentation) -> Bool {
+        if let override = cardOverrides[run.id] { return override }
+        return presentation.runs.count == 1 && run.status != .queued && !finishedWhileShown.contains(run.id)
+    }
+
+    private func cards(_ presentation: SubagentPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if presentation.mode == .chain && presentation.runs.count > 1 {
+                chain(presentation)
+            } else {
+                ForEach(presentation.runs) { run in
+                    card(run, step: nil, in: presentation)
                 }
             }
-            .padding(.leading, indented ? 22 : 10)
-            .padding(.trailing, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(run.id == selected.id ? appTheme.brass.opacity(0.12) : Color.clear)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(stepLabel.map { "\(run.name), step \($0)" } ?? run.name)
     }
 
-    private func runDetails(_ run: SubagentRun) -> some View {
+    private func chain(_ presentation: SubagentPresentation) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 6) {
-                ScrollView(.vertical) {
-                    Text(run.prompt.isEmpty ? "(no prompt)" : run.prompt)
-                        .font(AppFonts.code(12))
-                        .foregroundStyle(appTheme.secondaryText)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
+            ForEach(Array(presentation.runs.enumerated()), id: \.element.id) { index, run in
+                if index > 0 {
+                    Rectangle()
+                        .fill(presentation.runs[index - 1].status == .succeeded ? appTheme.good.opacity(0.6) : appTheme.line)
+                        .frame(width: 1.5, height: 10)
+                        .padding(.leading, 16.25)
+                        .accessibilityHidden(true)
                 }
-                .frame(height: promptHeight(run.prompt))
+                card(run, step: (index + 1, presentation.runs.count), in: presentation)
+            }
+        }
+    }
 
-                if !run.parameters.isEmpty {
-                    SubagentMetadataLayout(spacing: 0) {
-                        ForEach(run.parameters.indices, id: \.self) { index in
-                            if index > run.parameters.startIndex {
-                                Text("  ·  ")
-                                    .layoutValue(key: MetadataSeparatorKey.self, value: true)
-                            }
-                            Text(run.parameters[index])
-                        }
-                    }
-                    .font(AppFonts.code(10.5))
+    private func card(_ run: SubagentRun, step: (index: Int, count: Int)?, in presentation: SubagentPresentation) -> some View {
+        let expanded = isExpanded(run, in: presentation)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.14)) {
+                    cardOverrides[run.id] = !expanded
+                }
+            } label: {
+                cardLine(run, in: presentation, expanded: expanded)
+            }
+            .buttonStyle(.plain)
+            .help(expanded ? "Hide run details" : "Show run details")
+            .accessibilityLabel(cardAccessibilityLabel(run, step: step))
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+
+            if expanded {
+                Rectangle()
+                    .fill(appTheme.line.opacity(0.5))
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
+                SubagentRunBody(run: run, projectPath: projectPath)
+                    .padding(.leading, 32)
+                    .padding(.trailing, 14)
+                    .padding(.vertical, 12)
+                    .transition(.opacity)
+            }
+        }
+        .toolBodyStyle(padding: 0)
+    }
+
+    private func cardLine(_ run: SubagentRun, in presentation: SubagentPresentation, expanded: Bool) -> some View {
+        let showsToolCall = run.status == .running && run.activity.last?.kind == .tool
+        return HStack(spacing: 8) {
+            ToolActivityIndicator(state: activityState(run.status))
+            ZStack(alignment: .leading) {
+                ForEach(presentation.runs) { other in
+                    nameText(other.name).hidden()
+                }
+                nameText(run.name)
+            }
+            .frame(maxWidth: 220, alignment: .leading)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(2)
+            Text(run.liveText)
+                .font(showsToolCall ? AppFonts.code(11.5) : AppFonts.ui(12))
+                .foregroundStyle(run.status == .failed ? appTheme.danger : appTheme.secondaryText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            modelChip(run.model)
+                .frame(maxWidth: 170, alignment: .trailing)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
+                .help(run.model ?? "")
+            if let start = SubagentRunClock.start(clockKey(run)) {
+                SubagentElapsedText(start: start, end: SubagentRunClock.end(clockKey(run)), isRunning: run.status == .running)
+                    .font(AppFonts.ui(11))
+                    .monospacedDigit()
                     .foregroundStyle(appTheme.muted)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(minWidth: AppFonts.scaled(30), alignment: .trailing)
+                    .layoutPriority(3)
             }
-            .padding(10)
-
-            Rectangle()
-                .fill(appTheme.line.opacity(0.58))
-                .frame(height: 1)
-
-            SubagentStreamView(run: run)
+            Image(systemName: "chevron.right")
+                .font(AppFonts.ui(9, weight: .bold))
+                .foregroundStyle(appTheme.muted)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+                .frame(width: 12)
+                .accessibilityHidden(true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private func nameText(_ name: String) -> some View {
+        Text(name)
+            .font(AppFonts.ui(12.5, weight: .semibold))
+            .foregroundStyle(appTheme.text)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private func modelChip(_ model: String?) -> some View {
+        if let model {
+            Text(model.split(separator: "/").last.map(String.init) ?? model)
+                .font(AppFonts.ui(10.5, weight: .medium))
+                .foregroundStyle(appTheme.muted)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1.5)
+                .background(Capsule().fill(appTheme.panel.opacity(0.7)))
+                .overlay(Capsule().stroke(appTheme.line.opacity(0.6), lineWidth: 1))
+        }
+    }
+
+    private func cardAccessibilityLabel(_ run: SubagentRun, step: (index: Int, count: Int)?) -> String {
+        var parts = [step.map { "Step \($0.index) of \($0.count), \(run.name)" } ?? run.name]
+        switch run.status {
+        case .queued: parts.append("queued")
+        case .running: parts.append("running")
+        case .succeeded: parts.append("done")
+        case .failed: parts.append("failed")
+        }
+        if run.status != .queued { parts.append(run.liveText) }
+        return parts.joined(separator: ", ")
     }
 
     private func activityState(_ status: SubagentRunStatus) -> ToolActivityState {
@@ -450,13 +507,181 @@ struct SubagentToolDetailsView: View {
         }
     }
 
-    private func promptHeight(_ prompt: String) -> CGFloat {
-        let visualLines = prompt.components(separatedBy: "\n").reduce(0) { total, line in
-            total + max(1, Int(ceil(Double(max(line.count, 1)) / 76.0)))
+}
+
+private struct SubagentElapsedText: View {
+    let start: Date
+    let end: Date?
+    let isRunning: Bool
+
+    var body: some View {
+        if let end {
+            Text(TurnTiming.format(end.timeIntervalSince(start)))
+        } else if isRunning {
+            TimelineView(.periodic(from: start, by: 1)) { context in
+                Text(TurnTiming.format(context.date.timeIntervalSince(start)))
+            }
         }
-        return min(96, max(18, CGFloat(visualLines) * 17))
+    }
+}
+
+private struct SubagentRunBody: View {
+    @Environment(\.appTheme) private var appTheme
+    let run: SubagentRun
+    let projectPath: String?
+    @State private var showsAllActivity = false
+    @State private var panel: Panel?
+
+    private enum Panel {
+        case task
+        case activity
     }
 
+    private static let visibleToolCalls = 6
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let result = run.result {
+                NativeMarkdownView(
+                    markdown: result,
+                    role: .assistant,
+                    theme: appTheme.choice,
+                    projectPath: projectPath,
+                    textStyle: appTheme.textStyle
+                )
+            } else if let error = run.error {
+                Text(error)
+                    .font(AppFonts.code(12))
+                    .foregroundStyle(appTheme.danger)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                activityList
+            }
+
+            HStack(spacing: 14) {
+                if let usage = run.usage {
+                    Text(usage.label)
+                        .font(AppFonts.ui(11))
+                        .monospacedDigit()
+                        .foregroundStyle(appTheme.muted)
+                        .lineLimit(1)
+                        .help("\(usage.input) input tokens, \(usage.output) output tokens")
+                }
+                Spacer(minLength: 8)
+                ToolLinkButton(title: "Task") { toggle(.task) }
+                if showsActivityLink {
+                    ToolLinkButton(title: "\(toolCallCount) tool call\(toolCallCount == 1 ? "" : "s")") { toggle(.activity) }
+                }
+            }
+
+            if panel == .task {
+                taskPanel
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(appTheme.panel.opacity(0.7)))
+            } else if panel == .activity, showsActivityLink {
+                activityList
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(appTheme.panel.opacity(0.7)))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var toolCallCount: Int {
+        run.activity.filter { $0.kind == .tool }.count
+    }
+
+    private var showsActivityLink: Bool {
+        (run.result != nil || run.error != nil) && toolCallCount > 0
+    }
+
+    private func toggle(_ target: Panel) {
+        panel = panel == target ? nil : target
+    }
+
+    private var taskPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(run.prompt.isEmpty ? "No task text" : run.prompt)
+                .font(AppFonts.ui(12.5))
+                .foregroundStyle(run.prompt.isEmpty ? appTheme.muted : appTheme.secondaryText)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !run.parameters.isEmpty {
+                SubagentMetadataLayout(spacing: 0) {
+                    ForEach(run.parameters.indices, id: \.self) { index in
+                        if index > run.parameters.startIndex {
+                            Text("  ·  ")
+                                .layoutValue(key: MetadataSeparatorKey.self, value: true)
+                        }
+                        Text(run.parameters[index])
+                    }
+                }
+                .font(AppFonts.code(10.5))
+                .foregroundStyle(appTheme.muted)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var activityList: some View {
+        let toolIDs = run.activity.filter { $0.kind == .tool }.map(\.id)
+        let hiddenCount = showsAllActivity ? 0 : max(0, toolIDs.count - Self.visibleToolCalls)
+        let hidden = Set(toolIDs.prefix(hiddenCount))
+        VStack(alignment: .leading, spacing: 5) {
+            if hiddenCount > 0 {
+                ToolLinkButton(title: "\(hiddenCount) more tool call\(hiddenCount == 1 ? "" : "s")") {
+                    showsAllActivity = true
+                }
+            }
+            if run.activity.isEmpty {
+                Text("Waiting for output")
+                    .font(AppFonts.ui(12))
+                    .foregroundStyle(appTheme.muted)
+            }
+            ForEach(run.activity.filter { !hidden.contains($0.id) }) { item in
+                SubagentActivityRow(item: item)
+            }
+        }
+    }
+}
+
+private struct SubagentActivityRow: View {
+    @Environment(\.appTheme) private var appTheme
+    let item: SubagentOutputItem
+
+    var body: some View {
+        switch item.kind {
+        case .tool:
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: ToolDisplay.symbolName(forTool: item.toolName ?? ""))
+                    .font(AppFonts.ui(10, weight: .medium))
+                    .frame(width: 14)
+                    .accessibilityHidden(true)
+                Text(item.text)
+                    .font(AppFonts.code(11.5))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(appTheme.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(item.detail ?? item.text)
+        case .text:
+            Text(item.text)
+                .font(AppFonts.ui(12.5))
+                .foregroundStyle(appTheme.secondaryText)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 }
 
 private struct MetadataSeparatorKey: LayoutValueKey {
@@ -537,79 +762,3 @@ private struct SubagentMetadataLayout: Layout {
     }
 }
 
-private struct SubagentOutputRow: View {
-    @Environment(\.appTheme) private var appTheme
-    let item: SubagentOutputItem
-    @State private var showingCommand = false
-
-    var body: some View {
-        Text(item.text)
-            .font(AppFonts.code(item.kind == .tool ? 11.5 : 12))
-            .foregroundStyle(item.kind == .tool ? appTheme.muted : appTheme.codeText.opacity(0.92))
-            .textSelection(.enabled)
-            .padding(.trailing, item.bashCommand == nil ? 0 : 24)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .overlay(alignment: .topTrailing) {
-                if let command = item.bashCommand {
-                    Button { showingCommand.toggle() } label: {
-                        Image(systemName: "terminal")
-                            .font(AppFonts.ui(10, weight: .semibold))
-                            .foregroundStyle(showingCommand ? appTheme.brass : appTheme.muted)
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Show command")
-                    .accessibilityLabel("Show command")
-                    .popover(isPresented: $showingCommand, arrowEdge: .bottom) {
-                        BashCommandPopover(command: command)
-                            .glowPresentationBackground()
-                    }
-                }
-            }
-    }
-}
-
-private struct SubagentStreamView: View {
-    @Environment(\.appTheme) private var appTheme
-    let run: SubagentRun
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    if run.output.isEmpty {
-                        Text(emptyText)
-                            .font(AppFonts.code(11.5))
-                            .foregroundStyle(appTheme.muted)
-                    } else {
-                        ForEach(run.output) { item in
-                            SubagentOutputRow(item: item)
-                        }
-                    }
-                    Color.clear.frame(height: 1).id("subagent-stream-bottom")
-                }
-                .padding(10)
-            }
-            .frame(height: 184)
-            .background(appTheme.codeBackground.opacity(0.24))
-            .onAppear { scrollToBottom(proxy) }
-            .onChange(of: run.outputSignature) { _, _ in scrollToBottom(proxy) }
-        }
-    }
-
-    private var emptyText: String {
-        switch run.status {
-        case .queued: return "(queued)"
-        case .running: return "(waiting for output…)"
-        case .succeeded, .failed: return "(no output)"
-        }
-    }
-
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        DispatchQueue.main.async {
-            proxy.scrollTo("subagent-stream-bottom", anchor: .bottom)
-        }
-    }
-}

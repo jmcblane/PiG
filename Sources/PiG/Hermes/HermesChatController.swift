@@ -24,9 +24,7 @@ final class HermesChatController: ObservableObject, Identifiable {
     /// Local UUID for this chat, independent of the agent configuration.
     let chatID: String
 
-    @Published var messages: [ChatMessage] = [] {
-        didSet { if messages != oldValue { bottomScrollRequest &+= 1 } }
-    }
+    @Published var messages: [ChatMessage] = []
     @Published private(set) var isWorking = false
     /// Name of the tool the remote agent is running, if reported.
     @Published private(set) var currentTool: String?
@@ -37,6 +35,7 @@ final class HermesChatController: ObservableObject, Identifiable {
     /// nil means the server default.
     @Published private(set) var selectedModelID: String?
     @Published var bottomScrollRequest = 0
+    @Published var messageScrollRequest: MessageScrollRequest?
     /// Transcript paging, as in `SessionController`.
     @Published private var visibleMessageLimit = 60
 
@@ -121,6 +120,7 @@ final class HermesChatController: ObservableObject, Identifiable {
         guard !stopped, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         if !loaded { await load() }
         guard !stopped, let session else { return }
+        bottomScrollRequest &+= 1
         let model = selectedModelID
         await perform { await session.send(text, model: model) }
     }
@@ -193,7 +193,11 @@ extension HermesChatController: ChatTranscriptSource {
     }
     var transcriptProjectPath: String? { nil }
     var streamingFrameToken: Int { 0 }
-    var messageScrollRequest: MessageScrollRequest? { nil }
+    func scrollToMessage(_ messageID: String) {
+        guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
+        visibleMessageLimit = max(visibleMessageLimit, messages.count - index)
+        messageScrollRequest = MessageScrollRequest(messageID: messageID)
+    }
     var htmlActionTarget: SessionController? { nil }
 }
 

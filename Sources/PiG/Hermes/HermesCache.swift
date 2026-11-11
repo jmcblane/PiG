@@ -43,7 +43,7 @@ enum HermesCache {
         let url = journalURL(id)
         guard FileManager.default.fileExists(atPath: url.path) else { return HermesJournal() }
         do { return try JSONDecoder().decode(HermesJournal.self, from: Data(contentsOf: url)) }
-        catch { throw HermesError.message("The cached Hermes conversation cannot be read. Preserve its cache file before repairing it; sending is disabled to avoid duplicate work.") }
+        catch { throw HermesError.message("The cached Hermes chat cannot be read. Preserve its cache file before repairing it; sending is disabled to avoid duplicate work.") }
     }
     static func save(_ journal: HermesJournal, for id: String) throws {
         do {

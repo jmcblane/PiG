@@ -35,10 +35,10 @@ struct ChatTabContent: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else if let agent = model.selectedAgent {
-                AgentLandingView(agent: agent)
+                AgentLandingView(agent: agent, landingDraft: model.landingDraft)
                     .id(agent.id)
             } else if let selectedProjectPath {
-                ProjectLandingView(projectPath: selectedProjectPath)
+                ProjectLandingView(projectPath: selectedProjectPath, landingDraft: model.landingDraft)
                     .id("\(selectedProjectPath)|\(model.newChatHomeRequestID)")
             } else {
                 emptyContent
@@ -77,7 +77,7 @@ struct ChatTabContent: View {
             Image(systemName: "terminal")
                 .font(AppFonts.ui(42, weight: .light))
                 .foregroundStyle(appTheme.brass)
-            Text("Select or create a session")
+            Text("Select or create a chat")
                 .font(AppFonts.heading(24, weight: .semibold))
                 .foregroundStyle(appTheme.text)
             Text("Choose a project, or start a quick chat.")
@@ -113,6 +113,7 @@ private struct ProjectLandingView: View {
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
     let projectPath: String
+    @ObservedObject var landingDraft: LandingDraft
     @State private var projectMenuOpen = false
 
     private var projectName: String {
@@ -181,7 +182,7 @@ private struct ProjectLandingView: View {
                     )
                     .glowPresentationBackground()
                 }
-                Text(model.composingQuickChat ? "Temporary conversation" : projectPath.abbreviatingHomeDirectory())
+                Text(model.composingQuickChat ? "Temporary chat" : projectPath.abbreviatingHomeDirectory())
                     .font(AppFonts.ui(12.5))
                     .foregroundStyle(appTheme.muted)
                     .lineLimit(1)
@@ -194,8 +195,8 @@ private struct ProjectLandingView: View {
         if let controller = model.landingDraftController {
             ComposerView(
                 controller: controller,
-                draft: $model.landingDraftText,
-                imageAttachments: $model.landingDraftImages,
+                draft: $landingDraft.text,
+                imageAttachments: $landingDraft.images,
                 beforeSubmit: { model.activateLandingDraft(controller) },
                 focusOnAppear: true,
                 showsLandingResources: true
@@ -217,14 +218,14 @@ private struct ProjectLandingView: View {
                 Button {
                     NotificationCenter.default.post(name: .pigOpenPalette, object: PaletteScope.sessions.rawValue)
                 } label: {
-                    Text("Search all ⌘F")
+                    Text("Search all ⇧⌘F")
                 }
                 .buttonStyle(.plain)
                 .font(AppFonts.ui(12.5))
                 .foregroundStyle(appTheme.brass)
             }
             if recentSessions.isEmpty {
-                EmptyState(text: "No recent sessions", icon: "clock")
+                EmptyState(text: "No recent chats", icon: "clock")
                     .frame(maxWidth: .infinity, minHeight: 110)
             } else {
                 VStack(spacing: 2) {

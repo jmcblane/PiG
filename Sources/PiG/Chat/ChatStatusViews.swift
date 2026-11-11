@@ -26,6 +26,8 @@ struct UsageLimitIndicator: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Refresh usage limits")
+        .accessibilityValue(snapshot?.error ?? snapshot?.details.map { "\($0.label): \($0.remainingPercent)% remaining" }.joined(separator: ", ") ?? pendingText)
         .overlay(alignment: .bottomTrailing) {
             if hovering {
                 UsageLimitPopup(snapshot: snapshot, pendingText: pendingText)
@@ -123,17 +125,42 @@ private struct SegmentMeter: View {
 }
 
 /// Send (or abort) button ringed by the share of the context window in use.
-struct ContextRingSendButton: View {
+struct ComposerSendButton: View {
     @Environment(\.appTheme) private var appTheme
-    let percent: Double?
-    let tokens: Int?
-    let window: Int?
     let aborting: Bool
     let disabled: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
+            Circle()
+                .fill(aborting ? appTheme.danger : appTheme.brass)
+                .frame(width: 30, height: 30)
+                .overlay(
+                    Image(systemName: aborting ? "stop.fill" : "arrow.up")
+                        .font(AppFonts.ui(13, weight: .bold))
+                        .foregroundStyle(aborting ? appTheme.dangerForeground : appTheme.accentForeground)
+                )
+                .opacity(disabled ? 0.45 : 1)
+                .frame(width: 36, height: 36)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .help(aborting ? "Abort" : "Send")
+        .accessibilityLabel(aborting ? "Abort" : "Send")
+    }
+}
+
+struct ContextRingButton: View {
+    @Environment(\.appTheme) private var appTheme
+    @ObservedObject var controller: SessionController
+    @State private var showingStatistics = false
+
+    private var percent: Double? { controller.contextPercent }
+
+    var body: some View {
+        Button { showingStatistics.toggle() } label: {
             ZStack {
                 Circle()
                     .stroke(appTheme.line.opacity(0.8), lineWidth: 2.5)
@@ -142,24 +169,20 @@ struct ContextRingSendButton: View {
                     .stroke(ringColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.easeOut(duration: 0.4), value: percent)
-                Circle()
-                    .fill(aborting ? appTheme.danger : appTheme.brass)
-                    .frame(width: 26, height: 26)
-                    .overlay(
-                        Image(systemName: aborting ? "stop.fill" : "arrow.up")
-                            .font(AppFonts.ui(12, weight: .bold))
-                            .foregroundStyle(aborting ? appTheme.dangerForeground : appTheme.accentForeground)
-                    )
-                    .opacity(disabled ? 0.45 : 1)
             }
-            .frame(width: 36, height: 36)
-            .contentShape(Circle())
+            .frame(width: 14, height: 14)
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(disabled)
-        .help(aborting ? "Abort" : "Send — \(contextHelp)")
-        .accessibilityLabel(aborting ? "Abort" : "Send")
+        .help(contextHelp)
+        .accessibilityLabel("Context")
         .accessibilityValue(contextHelp)
+        .popover(isPresented: $showingStatistics, arrowEdge: .top) {
+            SessionStatisticsView(controller: controller)
+                .id(controller.id + (controller.sessionPath ?? ""))
+                .glowPresentationBackground()
+        }
     }
 
     private var ringColor: Color {
@@ -170,11 +193,11 @@ struct ContextRingSendButton: View {
     }
 
     private var contextHelp: String {
-        if let percent, let tokens, let window {
-            return "context \(Int(percent))% used (\(tokens.formatted()) of \(window.formatted()) tokens)"
+        if let percent, let tokens = controller.contextTokens, let window = controller.contextWindow {
+            return "Context \(Int(percent))% used (\(tokens.formatted()) of \(window.formatted()) tokens)"
         }
-        if let percent { return "context \(Int(percent))% used" }
-        return "context usage unavailable"
+        if let percent { return "Context \(Int(percent))% used" }
+        return "Context usage unavailable"
     }
 }
 
@@ -219,11 +242,12 @@ struct SignalMarch: View {
 
     @Environment(\.appTheme) private var appTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var occlusion = AppOcclusion.shared
     var presentation: Presentation = .standard
     var tone: Tone = .accent
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion || !occlusion.isVisible)) { timeline in
             let time = reduceMotion ? 0.0 : timeline.date.timeIntervalSinceReferenceDate
             HStack(spacing: presentation == .compact ? 1.5 : 2) {
                 ForEach(0..<5, id: \.self) { index in

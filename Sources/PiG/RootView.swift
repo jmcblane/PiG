@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct RootView: View {
     @Environment(\.appTheme) private var appTheme
+    @Environment(\.openSettings) private var openSettings
     @EnvironmentObject private var model: AppModel
     @State private var paletteScope: PaletteScope?
     @AppStorage(InboxColumn.visibilityKey) private var inboxVisible = true
@@ -75,6 +76,7 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pigPresentDialog)) { notification in
             if let request = notification.object as? GlowDialogRequest { model.dialog = request }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pigOpenSettings)) { _ in openSettings() }
         .background(appTheme.background)
         .font(AppFonts.ui(14))
         .sheet(item: Binding(
@@ -143,7 +145,7 @@ private struct UnifiedGlobalToast: View {
                 ChatAwareToastBranch(controller: controller, dismissedStatus: $dismissedStatus)
                     .id(controller.id)
             } else {
-                ExtensionOrStatusToast(dismissedStatus: $dismissedStatus)
+                ExtensionOrStatusToast(statusCenter: model.statusCenter, dismissedStatus: $dismissedStatus)
             }
         }
     }
@@ -189,7 +191,7 @@ private struct ChatAwareToastBranch: View {
                         }
                 }
             } else {
-                ExtensionOrStatusToast(dismissedStatus: $dismissedStatus)
+                ExtensionOrStatusToast(statusCenter: model.statusCenter, dismissedStatus: $dismissedStatus)
             }
         }
     }
@@ -199,6 +201,7 @@ private struct ChatAwareToastBranch: View {
 private struct ExtensionOrStatusToast: View {
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
+    @ObservedObject var statusCenter: StatusCenter
     @Binding var dismissedStatus: String?
 
     var body: some View {
@@ -206,7 +209,7 @@ private struct ExtensionOrStatusToast: View {
             if !model.extensionNotificationPresentations.isEmpty {
                 ExtensionNotificationsView(items: model.extensionNotificationPresentations)
             } else {
-                let text = model.statusLine
+                let text = statusCenter.line
                 if !text.isEmpty, text != dismissedStatus {
                     AutoDismissToast(
                         id: "status-\(text)",
@@ -214,7 +217,7 @@ private struct ExtensionOrStatusToast: View {
                         duration: 4,
                         dismiss: {
                             dismissedStatus = text
-                            if model.statusLine == text { model.statusLine = "" }
+                            if statusCenter.line == text { statusCenter.line = "" }
                         }
                     ) {
                         Text(text)
@@ -254,8 +257,8 @@ struct AppUpdateButton: View {
     }
 }
 
-/// Small colorful affordance for Pi / extension updates in the top bar. Opens the existing update review sheet; changelog and
-/// update actions live there. When only the installed notice remains (nothing
+/// Small colorful affordance for Pi / extension updates in the top bar. Opens the Pi tab in Settings, where
+/// the update actions live. When only the installed notice remains (nothing
 /// to download), it shows an info icon that opens the changelog instead.
 struct PiUpdateButton: View {
     @EnvironmentObject private var model: AppModel
@@ -387,19 +390,19 @@ struct ControllerSessionContextMenu: View {
     var body: some View {
         Button("Rename…", systemImage: "pencil") { model.requestSessionRename(controller) }
             .disabled(controller.sessionPath == nil || controller.showsActivityIndicator)
-            .help(controller.sessionPath == nil ? "Save this session before renaming it." : "Rename session")
+            .help(controller.sessionPath == nil ? "Save this chat before renaming it." : "Rename chat")
         RegenerateSessionTitleButton(path: controller.sessionPath, working: controller.showsActivityIndicator)
         Button("Reconnect") { model.reconnect(controller) }
             .disabled(controller.isProcessActive)
-        Button("Reload Session Runtime") { model.reloadSessionRuntime(controller) }
+        Button("Reload Chat Runtime") { model.reloadSessionRuntime(controller) }
             .disabled(!model.canReloadSessionRuntime(controller))
-        Button("Unload Session") { model.unload(controller) }
+        Button("Unload Chat") { model.unload(controller) }
             .disabled(!controller.isProcessActive || controller.showsActivityIndicator)
         Divider()
-        Button("Reload All Idle Session Runtimes") { model.reloadAllIdleSessionRuntimes() }
+        Button("Reload All Idle Chat Runtimes") { model.reloadAllIdleSessionRuntimes() }
             .disabled(!model.canReloadAnyIdleSessionRuntime)
-        Button("Unload Other Idle Sessions") { model.unloadOtherSessions(keeping: controller) }
-        Button("Unload All Idle Sessions") { model.unloadAllIdleSessions() }
+        Button("Unload Other Idle Chats") { model.unloadOtherSessions(keeping: controller) }
+        Button("Unload All Idle Chats") { model.unloadAllIdleSessions() }
         if controller.sessionPath != nil {
             Divider()
             Button("Move to Trash…", role: .destructive) { model.requestSessionDeletion(controller) }
@@ -419,14 +422,14 @@ struct SessionSummaryContextMenu: View {
             .disabled(model.activeController(forSessionPath: summary.filePath) != nil)
         RegenerateSessionTitleButton(path: summary.filePath, working: model.activeController(forSessionPath: summary.filePath) != nil)
         Button("Reconnect") { model.reconnectSession(summary) }
-        Button("Reload Session Runtime") { model.reloadSessionRuntime(path: summary.filePath) }
+        Button("Reload Chat Runtime") { model.reloadSessionRuntime(path: summary.filePath) }
             .disabled(!model.canReloadSessionRuntime(loadedController))
-        Button("Unload Session") { model.unloadSession(path: summary.filePath) }
+        Button("Unload Chat") { model.unloadSession(path: summary.filePath) }
         Divider()
-        Button("Reload All Idle Session Runtimes") { model.reloadAllIdleSessionRuntimes() }
+        Button("Reload All Idle Chat Runtimes") { model.reloadAllIdleSessionRuntimes() }
             .disabled(!model.canReloadAnyIdleSessionRuntime)
-        Button("Unload Other Idle Sessions") { model.unloadOtherSessions(keeping: model.selectedController) }
-        Button("Unload All Idle Sessions") { model.unloadAllIdleSessions() }
+        Button("Unload Other Idle Chats") { model.unloadOtherSessions(keeping: model.selectedController) }
+        Button("Unload All Idle Chats") { model.unloadAllIdleSessions() }
         Divider()
         Button("Move to Trash…", role: .destructive) { model.requestSessionDeletion(summary) }
             .disabled(model.activeController(forSessionPath: summary.filePath) != nil)
@@ -444,7 +447,7 @@ private struct RegenerateSessionTitleButton: View {
             if let path { model.regenerateSessionTitle(path: path) }
         }
         .disabled(path == nil || working || generating)
-        .help("Generate a new title from the first few conversation turns using the naming model settings.")
+        .help("Generate a new title from the first few chat turns using the naming model settings.")
     }
 }
 
@@ -513,7 +516,8 @@ struct SessionListRow: View {
                 .allowsHitTesting(hovering)
                 .animation(.easeInOut(duration: 0.16), value: childDisclosureExpanded)
                 .padding(.trailing, 8)
-                .help(childDisclosureExpanded ? "Hide child sessions" : "Show child sessions")
+                .help(childDisclosureExpanded ? "Hide child chats" : "Show child chats")
+                .accessibilityLabel(childDisclosureExpanded ? "Hide child chats" : "Show child chats")
             }
         }
         .onHover { hovering = $0 }

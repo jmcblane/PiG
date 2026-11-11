@@ -393,14 +393,17 @@ struct FileTreeView: View {
             .buttonStyle(InlineIconButtonStyle())
             .foregroundStyle(model.showHidden ? appTheme.brass : appTheme.muted)
             .help(model.showHidden ? "Hide hidden files" : "Show hidden files")
+            .accessibilityLabel(model.showHidden ? "Hide hidden files" : "Show hidden files")
 
             Button { model.refreshAll() } label: { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(InlineIconButtonStyle())
                 .help("Refresh")
+                .accessibilityLabel("Refresh")
 
             Button { NSWorkspace.shared.open(model.rootURL) } label: { Image(systemName: "arrow.up.forward.square") }
                 .buttonStyle(InlineIconButtonStyle())
                 .help("Open in Finder")
+                .accessibilityLabel("Open in Finder")
         }
         .padding(.horizontal, 12)
         .padding(.top, 12)
@@ -663,6 +666,7 @@ private struct FileTreeRowView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(expanded ? "Collapse folder" : "Expand folder")
             } else {
                 Color.clear.frame(width: 12, height: 1)
             }

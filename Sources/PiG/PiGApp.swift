@@ -49,46 +49,33 @@ struct PiGApp: App {
                     }
                 }
                 .keyboardShortcut("n", modifiers: .command)
-            }
-            CommandGroup(after: .toolbar) {
-                Toggle("Expand Open Chats", isOn: $inboxVisible.animation(.smooth(duration: 0.22)))
-                    .keyboardShortcut("s", modifiers: .command)
-                Button("Reopen Last Done Chat") { model.undoLastInboxDismissal() }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
-                    .disabled(!model.canUndoInboxDismissal)
                 Button("New Quick Chat") {
                     model.showNewChatHome(quickChat: true)
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 Divider()
-                Button("Go to Anything…") {
-                    NotificationCenter.default.post(name: .pigOpenPalette, object: nil)
-                }
-                .keyboardShortcut("k", modifiers: .command)
-                Button("Search Sessions") {
-                    NotificationCenter.default.post(name: .pigOpenPalette, object: PaletteScope.sessions.rawValue)
+                Button("Reopen Last Done Chat") { model.undoLastInboxDismissal() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(!model.canUndoInboxDismissal)
+            }
+            CommandGroup(after: .textEditing) {
+                Divider()
+                Button("Find in Chat") {
+                    NotificationCenter.default.post(name: .pigFindInChat, object: nil)
                 }
                 .keyboardShortcut("f", modifiers: .command)
-                Button("Toggle Fullscreen Terminal") {
-                    NotificationCenter.default.post(name: .pigToggleFullscreenTerminal, object: nil)
+                Button("Find Next") {
+                    NotificationCenter.default.post(name: .pigFindNext, object: nil)
                 }
-                .keyboardShortcut("f", modifiers: [.command, .shift])
-                Button("Open Vertical Terminal Split") {
-                    NotificationCenter.default.post(name: .pigOpenVerticalTerminalSplit, object: nil)
+                .keyboardShortcut("g", modifiers: .command)
+                Button("Find Previous") {
+                    NotificationCenter.default.post(name: .pigFindPrevious, object: nil)
                 }
-                .keyboardShortcut("d", modifiers: .command)
-                Button("Open Horizontal Terminal Split") {
-                    NotificationCenter.default.post(name: .pigOpenHorizontalTerminalSplit, object: nil)
-                }
-                .keyboardShortcut("d", modifiers: [.command, .shift])
-                Divider()
-                ForEach(Array(quickModels.enumerated()), id: \.offset) { slot, id in
-                    Button("Quick Model \(slot + 1)") {
-                        model.activeComposerController?.setModel(id)
-                    }
-                    .keyboardShortcut(KeyEquivalent(Character(String(slot + 1))), modifiers: .command)
-                    .disabled(id.isEmpty || model.activeComposerController?.models.contains(where: { $0.id == id }) != true)
-                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+            }
+            CommandGroup(after: .toolbar) {
+                Toggle("Expand Open Chats", isOn: $inboxVisible.animation(.smooth(duration: 0.22)))
+                    .keyboardShortcut("s", modifiers: .command)
                 Divider()
                 Button("Bigger Text") { model.textSizeStep += 1 }
                     .keyboardShortcut("=", modifiers: .command)
@@ -100,20 +87,43 @@ struct PiGApp: App {
                     .keyboardShortcut("0", modifiers: .command)
                     .disabled(model.textSizeStep == TextSizePreference.actualSizeStep)
                 Divider()
-                Button("Pi Updates…") {
-                    model.piMaintenance.presentUpdates(
-                        cwd: model.selectedController?.projectPath ?? model.selectedProjectPath ?? PiPaths.home.path,
-                        projectName: model.selectedProject?.displayName
-                    )
+                Button("Toggle Fullscreen Terminal") {
+                    NotificationCenter.default.post(name: .pigToggleFullscreenTerminal, object: nil)
                 }
-                Button("What’s New in Pi…") {
-                    model.piMaintenance.openChangelog()
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                Button("Open Vertical Terminal Split") {
+                    NotificationCenter.default.post(name: .pigOpenVerticalTerminalSplit, object: nil)
+                }
+                .keyboardShortcut("d", modifiers: .command)
+                Button("Open Horizontal Terminal Split") {
+                    NotificationCenter.default.post(name: .pigOpenHorizontalTerminalSplit, object: nil)
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+            }
+            CommandMenu("Go") {
+                Button("Go to Anything…") {
+                    NotificationCenter.default.post(name: .pigOpenPalette, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                Button("Search Chats…") {
+                    NotificationCenter.default.post(name: .pigOpenPalette, object: PaletteScope.sessions.rawValue)
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+            }
+            CommandMenu("Chat") {
+                ForEach(Array(quickModels.enumerated()), id: \.offset) { slot, id in
+                    let quickModel = id.isEmpty ? nil : model.activeComposerController?.models.first(where: { $0.id == id })
+                    Button(quickModel?.name ?? "Quick Model \(slot + 1)") {
+                        model.activeComposerController?.setModel(id)
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character(String(slot + 1))), modifiers: .command)
+                    .disabled(quickModel == nil)
                 }
                 Divider()
-                Button("Unload Other Idle Sessions") {
+                Button("Unload Other Idle Chats") {
                     model.unloadOtherSessions(keeping: model.selectedController)
                 }
-                Button("Unload All Idle Sessions") {
+                Button("Unload All Idle Chats") {
                     model.unloadAllIdleSessions()
                 }
             }
@@ -121,7 +131,7 @@ struct PiGApp: App {
 
         Settings {
             SettingsWindowView()
-                .frame(width: 600, height: 680)
+                .frame(width: 600, height: 800)
                 .environmentObject(model)
                 .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textStyle: model.textStyle))
                 .preferredColorScheme(model.selectedTheme.isLight ? .light : .dark)

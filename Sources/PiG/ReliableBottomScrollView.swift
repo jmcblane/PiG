@@ -8,6 +8,7 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
     var textStyle: TextStyle = .current
     var topAnchorToken: Int = 0
     var messageScrollRequest: MessageScrollRequest? = nil
+    var findMatch: ChatFindMatch? = nil
     let content: () -> Content
 
     func makeCoordinator() -> Coordinator {
@@ -15,7 +16,7 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = BottomLockingNSScrollView()
+        let scrollView = NSScrollView()
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
@@ -23,11 +24,8 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         scrollView.borderType = .noBorder
         scrollView.scrollerStyle = .overlay
         scrollView.contentView.postsBoundsChangedNotifications = true
-        scrollView.onUserScroll = { [weak coordinator = context.coordinator] in
-            coordinator?.userDidScroll()
-        }
 
-        let hosting = TranscriptHostingView(rootView: content())
+        let hosting = TranscriptHostingView(rootView: TopPinnedDocument(content: content()))
         hosting.isFlipped = true
         hosting.translatesAutoresizingMaskIntoConstraints = true
         hosting.autoresizingMask = [.width]
@@ -43,6 +41,7 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         context.coordinator.lastStreamingFrameToken = streamingFrameToken
         context.coordinator.lastTopAnchorToken = topAnchorToken
         context.coordinator.lastMessageScrollRequestID = messageScrollRequest?.id
+        context.coordinator.findMatch = findMatch
         context.coordinator.lastClipSize = scrollView.contentView.bounds.size
 
         NotificationCenter.default.addObserver(
@@ -61,7 +60,7 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let hosting = context.coordinator.hostingView else { return }
-        hosting.rootView = content()
+        hosting.rootView = TopPinnedDocument(content: content())
 
         let styleChanged = context.coordinator.lastTextStyle != textStyle
         if styleChanged { context.coordinator.lastTextStyle = textStyle }
@@ -73,9 +72,13 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         if topInsert { context.coordinator.lastTopAnchorToken = topAnchorToken }
         let messageTargetChanged = context.coordinator.lastMessageScrollRequestID != messageScrollRequest?.id
         if messageTargetChanged { context.coordinator.lastMessageScrollRequestID = messageScrollRequest?.id }
+        let findTargetChanged = context.coordinator.findMatch != findMatch
+        context.coordinator.findMatch = findMatch
 
         if messageTargetChanged, let request = messageScrollRequest {
             context.coordinator.scrollToMessage(request.messageID)
+        } else if findTargetChanged, let findMatch {
+            context.coordinator.scrollToMessage(findMatch.messageID)
         } else if topInsert && !forced {
             context.coordinator.relayoutPreservingTopInsertion()
         } else if streamingFrame && !forced && !styleChanged {
@@ -91,19 +94,26 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         weak var scrollView: NSScrollView?
-        weak var hostingView: TranscriptHostingView<Content>?
+        weak var hostingView: TranscriptHostingView<TopPinnedDocument<Content>>?
         var isAtBottomBinding: Binding<Bool>
         var lastForceToken = 0
         var lastTextStyle = TextStyle.current
         var lastStreamingFrameToken = 0
         var lastTopAnchorToken = 0
         var lastMessageScrollRequestID: UUID?
+        var findMatch: ChatFindMatch?
         var lockToBottom = true
         var lastClipSize: CGSize = .zero
         var shouldFollowBottom: Bool { !isTargetingMessage && lockToBottom }
 
-        private var userScrollPending = false
         private var isTargetingMessage = false
+        private var lastOriginY: CGFloat = 0
+        // The message at the top of the viewport and how far the viewport has
+        // scrolled past its top. While reading scrolled up, relayouts restore
+        // this instead of the raw scroll offset, so content that changes
+        // height above the viewport (a tool group folding when its turn ends,
+        // the oldest message leaving the window) cannot move the text on screen.
+        private var readingAnchor: (id: NSUserInterfaceItemIdentifier, offset: CGFloat)?
         private var isProgrammaticScroll = false
         private var lastDocumentHeight: CGFloat = 0
         private var clipResizeGeneration = 0
@@ -111,6 +121,8 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         private var atBottomUpdateGeneration = 0
         private var isMeasuring = false
         private var contentSizePassScheduled = false
+        private var invalidatedWhileMeasuring = false
+        private var remeasureBudget = 3
         private let threshold: CGFloat = 36
 
         init(isAtBottom: Binding<Bool>) {
@@ -118,8 +130,12 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         }
 
         @objc func boundsDidChange(_ notification: Notification) {
-            guard !userScrollPending, !isProgrammaticScroll else { return }
-            let clipSize = scrollView?.contentView.bounds.size ?? .zero
+            guard let clipView = scrollView?.contentView else { return }
+            let originY = clipView.bounds.origin.y
+            let movedUp = originY < lastOriginY - 0.5
+            lastOriginY = originY
+            guard !isProgrammaticScroll, !isMeasuring else { return }
+            let clipSize = clipView.bounds.size
             if abs(clipSize.width - lastClipSize.width) > 0.5 || abs(clipSize.height - lastClipSize.height) > 0.5 {
                 // Live resize: keep the bottom pinned using the stale document
                 // height and defer the full-document measurement until the
@@ -129,33 +145,28 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
                 scheduleClipResizeRelayout()
                 return
             }
-            if shouldFollowBottom {
-                _ = measureAndApplyDocumentSize()
-                scrollToBottom()
-            } else {
-                updateAtBottom()
-            }
-        }
-
-        func userDidScroll() {
+            // Any other bounds change is the user scrolling: wheel, scroller
+            // drag, keyboard, or autoscroll while selecting. Scrolling up lets
+            // go of the bottom at once; only reaching the bottom takes it back.
+            // The elastic bounce at the bottom also moves up, but ends there.
             cancelMessageTargeting()
-            userScrollPending = true
-            lockToBottom = false
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.userScrollPending = false
-                let atBottom = self.computeAtBottom(margin: 8)
-                self.lockToBottom = atBottom && !self.isTargetingMessage
-                self.setAtBottom(atBottom)
+            if movedUp && !computeAtBottom(margin: 1) {
+                lockToBottom = false
+            } else if computeAtBottom(margin: 8) {
+                lockToBottom = true
             }
+            if !lockToBottom { captureReadingAnchor() }
+            setAtBottom(computeAtBottom(margin: threshold))
         }
 
         func relayoutStreamingFrame(follow: Bool) {
+            let previousOrigin = scrollView?.contentView.bounds.origin ?? .zero
             _ = measureAndApplyDocumentSize()
-            if follow && !isTargetingMessage && !userScrollPending {
+            if follow && !isTargetingMessage {
                 lockToBottom = true
                 scrollToBottom()
             } else {
+                holdReadingPosition(fallback: previousOrigin)
                 updateAtBottom()
             }
         }
@@ -168,7 +179,19 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         // document frame can never stay shorter than what is rendered (which
         // squeezes rows into each other and hides content under the composer).
         func hostedContentSizeInvalidated() {
-            guard !isMeasuring, !contentSizePassScheduled else { return }
+            // A layout that lands while measuring can leave that measurement
+            // stale, so it earns another pass. The budget stops a layout that
+            // invalidates on every measurement from looping.
+            if isMeasuring {
+                invalidatedWhileMeasuring = true
+                return
+            }
+            remeasureBudget = 3
+            scheduleContentSizePass()
+        }
+
+        private func scheduleContentSizePass() {
+            guard !contentSizePassScheduled else { return }
             contentSizePassScheduled = true
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -186,23 +209,57 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
                 updateAtBottom()
                 return
             }
-            if shouldFollowBottom && !userScrollPending {
+            if shouldFollowBottom {
                 scrollToBottom()
                 return
             }
-            // Reading from further up: keep the current viewport pinned, only
-            // clamp it into the document that just changed size.
-            let maxY = max(0, newHeight - scrollView.contentView.bounds.height)
-            let target = NSPoint(x: previousOrigin.x, y: min(max(previousOrigin.y, 0), maxY))
-            if abs(target.y - previousOrigin.y) > 0.5 {
-                isProgrammaticScroll = true
-                scrollView.contentView.scroll(to: target)
-                scrollView.reflectScrolledClipView(scrollView.contentView)
-                isProgrammaticScroll = false
-            } else {
-                scrollView.reflectScrolledClipView(scrollView.contentView)
-            }
+            holdReadingPosition(fallback: previousOrigin)
             updateAtBottom()
+        }
+
+        // Reading from further up: keep the anchored message where it is on
+        // screen. Without an anchor, keep the scroll offset. Either way the
+        // viewport is clamped into the document, which may have changed size.
+        private func holdReadingPosition(fallback: NSPoint) {
+            guard let scrollView, let hostingView else { return }
+            hostingView.layoutSubtreeIfNeeded()
+            let clipView = scrollView.contentView
+            var y = fallback.y
+            var anchored = false
+            if let anchor = readingAnchor, let view = descendant(with: anchor.id, in: hostingView) {
+                y = view.convert(view.bounds, to: hostingView).minY + anchor.offset
+                anchored = true
+            }
+            let maxY = max(0, hostingView.frame.height - clipView.bounds.height)
+            y = min(max(y, 0), maxY)
+            if abs(y - clipView.bounds.origin.y) > 0.5 {
+                isProgrammaticScroll = true
+                clipView.scroll(to: NSPoint(x: fallback.x, y: y))
+                isProgrammaticScroll = false
+            }
+            scrollView.reflectScrolledClipView(clipView)
+            if !anchored { captureReadingAnchor() }
+        }
+
+        // Prefers the message the viewport's top edge cuts through, then the
+        // first message starting inside the viewport, then the nearest above.
+        private func captureReadingAnchor() {
+            guard let scrollView, let hostingView else { return }
+            let visible = scrollView.contentView.bounds
+            var anchors: [(id: NSUserInterfaceItemIdentifier, rect: NSRect)] = []
+            func visit(_ view: NSView) {
+                if let id = view.identifier, id.rawValue.hasPrefix(ChatMessageScrollAnchor.identifierPrefix) {
+                    anchors.append((id, view.convert(view.bounds, to: hostingView)))
+                } else {
+                    view.subviews.forEach(visit)
+                }
+            }
+            visit(hostingView)
+            let best = anchors.first { $0.rect.minY <= visible.minY && $0.rect.maxY > visible.minY }
+                ?? anchors.filter { $0.rect.minY > visible.minY && $0.rect.minY < visible.maxY }
+                    .min { $0.rect.minY < $1.rect.minY }
+                ?? anchors.filter { $0.rect.minY <= visible.minY }.max { $0.rect.minY < $1.rect.minY }
+            readingAnchor = best.map { ($0.id, visible.minY - $0.rect.minY) }
         }
 
         // Content was prepended above the viewport (e.g. "Load earlier
@@ -225,14 +282,14 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
             scrollView.contentView.scroll(to: target)
             scrollView.reflectScrolledClipView(scrollView.contentView)
             isProgrammaticScroll = false
+            hostingView?.layoutSubtreeIfNeeded()
+            captureReadingAnchor()
             setAtBottom(computeAtBottom(margin: threshold))
         }
 
         func relayout(follow: Bool, force: Bool) {
-            let previousHeight = lastDocumentHeight
             let previousOrigin = scrollView?.contentView.bounds.origin ?? .zero
-            let newHeight = measureAndApplyDocumentSize()
-            let grew = abs(newHeight - previousHeight) > 0.5
+            measureAndApplyDocumentSize()
 
             if force {
                 cancelMessageTargeting()
@@ -250,20 +307,13 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
                 return
             }
 
-            if follow && !isTargetingMessage && !userScrollPending {
+            if follow && !isTargetingMessage {
                 lockToBottom = true
                 scrollToBottom()
                 return
             }
 
-            if grew, let scrollView {
-                let maxY = max(0, newHeight - scrollView.contentView.bounds.height)
-                let preserved = NSPoint(x: previousOrigin.x, y: min(max(previousOrigin.y, 0), maxY))
-                isProgrammaticScroll = true
-                scrollView.contentView.scroll(to: preserved)
-                scrollView.reflectScrolledClipView(scrollView.contentView)
-                isProgrammaticScroll = false
-            }
+            holdReadingPosition(fallback: previousOrigin)
             updateAtBottom()
         }
 
@@ -271,7 +321,14 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         private func measureAndApplyDocumentSize() -> CGFloat {
             guard let scrollView, let hostingView else { return 0 }
             isMeasuring = true
-            defer { isMeasuring = false }
+            invalidatedWhileMeasuring = false
+            defer {
+                isMeasuring = false
+                if invalidatedWhileMeasuring, remeasureBudget > 0 {
+                    remeasureBudget -= 1
+                    scheduleContentSizePass()
+                }
+            }
             let width = max(scrollView.contentView.bounds.width, 100)
             hostingView.frame.size.width = width
             hostingView.needsLayout = true
@@ -309,6 +366,7 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
             let generation = targetScrollGeneration
             isTargetingMessage = true
             lockToBottom = false
+            readingAnchor = nil
             setAtBottom(false)
             let retryDelays: [TimeInterval] = [0, 0.06, 0.22]
             for delay in retryDelays {
@@ -329,7 +387,12 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
             hostingView.layoutSubtreeIfNeeded()
             let identifier = NSUserInterfaceItemIdentifier("PiG.chatMessage.\(messageID)")
             guard let anchor = descendant(with: identifier, in: hostingView) else { return }
-            let rect = anchor.convert(anchor.bounds, to: hostingView)
+            let rect: NSRect
+            if findMatch?.messageID == messageID, let matchRect = currentFindRect(in: hostingView, relativeTo: hostingView) {
+                rect = matchRect
+            } else {
+                rect = anchor.convert(anchor.bounds, to: hostingView)
+            }
             let clipHeight = scrollView.contentView.bounds.height
             let maxY = max(0, hostingView.frame.height - clipHeight)
             let targetY = min(max(rect.midY - clipHeight / 2, 0), maxY)
@@ -338,7 +401,18 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
             scrollView.contentView.scroll(to: NSPoint(x: 0, y: targetY))
             scrollView.reflectScrolledClipView(scrollView.contentView)
             isProgrammaticScroll = false
+            captureReadingAnchor()
             setAtBottom(computeAtBottom(margin: threshold))
+        }
+
+        private func currentFindRect(in view: NSView, relativeTo document: NSView) -> NSRect? {
+            if let text = view as? MarkdownTextView, let rect = text.currentFindRect {
+                return text.convert(rect, to: document)
+            }
+            for child in view.subviews {
+                if let rect = currentFindRect(in: child, relativeTo: document) { return rect }
+            }
+            return nil
         }
 
         private func finishMessageScroll(generation: Int) {
@@ -375,13 +449,15 @@ struct ReliableBottomScrollView<Content: View>: NSViewRepresentable {
         }
 
         private func updateAtBottom() {
-            let atBottom = computeAtBottom(margin: threshold)
+            // Being near the bottom is not following it: a reader a few lines
+            // up stays put. A document that shrank onto the viewport's bottom
+            // edge does resume following.
             if isTargetingMessage {
                 lockToBottom = false
-            } else if atBottom {
+            } else if computeAtBottom(margin: 1) {
                 lockToBottom = true
             }
-            setAtBottom(atBottom)
+            setAtBottom(computeAtBottom(margin: threshold))
         }
 
         private func computeAtBottom(margin: CGFloat) -> Bool {
@@ -438,16 +514,36 @@ struct ChatMessageScrollAnchor: NSViewRepresentable {
         nsView.identifier = identifier
     }
 
+    static let identifierPrefix = "PiG.chatMessage."
+
     private var identifier: NSUserInterfaceItemIdentifier {
-        NSUserInterfaceItemIdentifier("PiG.chatMessage.\(messageID)")
+        NSUserInterfaceItemIdentifier(Self.identifierPrefix + messageID)
     }
 }
 
-final class BottomLockingNSScrollView: NSScrollView {
-    var onUserScroll: (() -> Void)?
+// NSHostingView pins content taller than its frame to the bottom edge, so a
+// row that grows before the document frame catches up pushes everything above
+// it past the top of the document, out of scrolling reach. Accepting the
+// proposed height and placing the content at the top makes it overflow
+// downward instead, where the next measurement picks it up.
+struct TopPinnedDocument<Content: View>: View {
+    let content: Content
 
-    override func scrollWheel(with event: NSEvent) {
-        onUserScroll?()
-        super.scrollWheel(with: event)
+    var body: some View {
+        TopPinnedLayout { content }
+    }
+}
+
+private struct TopPinnedLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let size = subview.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        guard let height = proposal.height else { return size }
+        return CGSize(width: size.width, height: min(size.height, height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: nil))
     }
 }

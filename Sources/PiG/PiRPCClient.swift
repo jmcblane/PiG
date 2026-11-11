@@ -93,7 +93,7 @@ final class PiRPCClient {
             case .launchFailed(let message): return message
             case .commandFailed(let message): return message
             case .invalidResponse: return "Invalid RPC response"
-            case .timedOut(let command): return "pi RPC \(command) request timed out. It may still have been accepted; check the session before retrying."
+            case .timedOut(let command): return "pi RPC \(command) request timed out. It may still have been accepted; check the chat before retrying."
             case .writeFailed(let message): return "Failed to write to pi RPC: \(message)"
             }
         }

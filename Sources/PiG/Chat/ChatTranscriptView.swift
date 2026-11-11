@@ -11,6 +11,7 @@ protocol ChatTranscriptSource: ObservableObject {
     var visibleMessages: [ChatMessage] { get }
     var hiddenMessageCount: Int { get }
     func loadEarlierMessages()
+    func scrollToMessage(_ messageID: String)
     var isWorking: Bool { get }
     var isThinking: Bool { get }
     var isCompacting: Bool { get }
@@ -50,8 +51,11 @@ extension EnvironmentValues {
 
 struct ChatScrollView<Controller: ChatTranscriptSource>: View {
     @Environment(\.appTheme) private var appTheme
+    @Environment(\.chatFindEnabled) private var findEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var model: AppModel
     @ObservedObject var controller: Controller
+    @StateObject private var find = ChatFindState()
     let theme: AppThemeChoice
     @State private var isAtBottom = true
     @State private var forceScrollToken = 0
@@ -93,7 +97,8 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                     streamingFrameToken: controller.streamingFrameToken,
                     textStyle: model.textStyle,
                     topAnchorToken: topAnchorToken,
-                    messageScrollRequest: controller.messageScrollRequest
+                    messageScrollRequest: controller.messageScrollRequest,
+                    findMatch: find.currentMatch
                 ) {
                     VStack(alignment: .leading, spacing: 0) {
                         if controller.hiddenMessageCount > 0 {
@@ -104,42 +109,25 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                         }
                         ForEach(presentation.items) { item in
                             switch item {
-                            case .message(let message):
-                                ChatMessageRow(
-                                    message: message,
-                                    projectPath: controller.transcriptProjectPath,
-                                    activityText: activityText,
-                                    theme: theme,
-                                    textStyle: model.textStyle,
-                                    showThinkingTraces: model.showThinkingTraces,
-                                    isHighlighted: highlightedMessageID == message.id,
-                                    htmlArtifacts: presentation.widgets(for: message),
-                                    htmlActionTarget: controller.htmlActionTarget,
-                                    turnTiming: presentation.turnTimings[message.id]
-                                )
-                                .equatable()
-                                .background {
-                                    ChatMessageScrollAnchor(messageID: message.id)
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                }
+                            case .message(let message, let showsActivityIndicator):
+                                messageRow(message, presentation: presentation, showsActivityIndicator: showsActivityIndicator)
                             case .toolGroup(let group):
-                                ToolActivityView(
-                                    group: group,
-                                    projectPath: controller.transcriptProjectPath,
-                                    activityText: activityText,
-                                    theme: theme,
-                                    textStyle: model.textStyle,
-                                    showThinkingTraces: model.showThinkingTraces,
-                                    highlightedMessageID: highlightedMessageID,
-                                    htmlArtifacts: presentation.htmlArtifacts,
-                                    htmlActionTarget: controller.htmlActionTarget
-                                )
+                                toolGroup(group, presentation: presentation)
                             case .htmlArtifact(let artifact):
                                 HTMLArtifactView(artifact: artifact, theme: theme, textStyle: model.textStyle,
                                                  onSendMessage: controller.htmlActionTarget == nil ? nil : sendHTMLMessage)
                                     .padding(.leading, 18)
                                     .padding(.trailing, 18)
                                     .padding(.vertical, 8)
+                            case .activeTools(_, let tools):
+                                ToolGroupView(tools: tools, projectPath: controller.transcriptProjectPath)
+                                    .padding(.leading, 36)
+                                    .padding(.trailing, 18)
+                                    .padding(.vertical, 6)
+                            case .activity:
+                                InlineActivityIndicator(text: activityText)
+                                    .padding(.horizontal, 18)
+                                    .padding(.vertical, 16)
                             case .userTools(let messageID, let tools):
                                 ToolGroupView(tools: tools, projectPath: controller.transcriptProjectPath)
                                     .padding(.leading, 36)
@@ -192,9 +180,13 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                 .onAppear { forceScrollToken += 1 }
                 .onChange(of: controller.id) { _, _ in forceScrollToken += 1 }
                 .onChange(of: controller.bottomScrollRequest) { _, _ in forceScrollToken += 1 }
-                .onChange(of: controller.trailingActivityText) { _, _ in forceScrollToken += 1 }
                 .onChange(of: controller.messageScrollRequest) { _, request in
                     guard let request else { return }
+                    if find.currentMatch?.messageID == request.messageID {
+                        highlightedMessageID = nil
+                        highlightRequestID = nil
+                        return
+                    }
                     highlightedMessageID = request.messageID
                     highlightRequestID = request.id
                     Task {
@@ -226,11 +218,119 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
                 .allowsHitTesting(!isAtBottom)
                 .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isAtBottom)
             }
+            .overlay(alignment: .topTrailing) {
+                if find.isOpen {
+                    ChatFindBar(state: find, close: closeFind)
+                        .padding(.top, 12)
+                        .padding(.trailing, 18)
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -6)))
+                        .onChange(of: find.query) { _, _ in scheduleFind(queryChanged: true) }
+                        .onChange(of: controller.messages, initial: true) { _, _ in scheduleFind() }
+                        .onChange(of: theme) { _, _ in scheduleFind() }
+                        .onChange(of: model.textStyle) { _, _ in scheduleFind() }
+                }
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: find.isOpen)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pigFindInChat)) { _ in
+            guard findEnabled else { return }
+            find.open()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pigFindNext)) { _ in
+            guard findEnabled, find.isOpen else { return }
+            find.step(1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pigFindPrevious)) { _ in
+            guard findEnabled, find.isOpen else { return }
+            find.step(-1)
+        }
+        .onChange(of: find.navigationRequest) { _, _ in
+            if let match = find.currentMatch { controller.scrollToMessage(match.messageID) }
+        }
+        .onChange(of: findEnabled) { _, enabled in
+            if !enabled { find.close() }
+        }
+        .onChange(of: controller.id) { _, _ in find.close() }
+        .onDisappear { find.close() }
     }
 }
 
 private extension ChatScrollView {
+    func scheduleFind(queryChanged: Bool = false) {
+        find.scheduleRefresh(queryChanged: queryChanged) {
+            find.refresh(messages: controller.messages, theme: theme, textStyle: model.textStyle,
+                         projectPath: controller.transcriptProjectPath)
+        }
+    }
+
+    func closeFind() {
+        guard find.isOpen else { return }
+        find.close()
+        ChatFindComposerFocus.restore()
+    }
+
+    func messageRow(_ message: ChatMessage, presentation: TranscriptToolPresentation,
+                    showsActivityIndicator: Bool = false) -> some View {
+        ChatMessageRow(
+            message: message,
+            projectPath: controller.transcriptProjectPath,
+            activityText: activityText,
+            theme: theme,
+            textStyle: model.textStyle,
+            showThinkingTraces: model.showThinkingTraces,
+            isHighlighted: highlightedMessageID == message.id,
+            showsActivityIndicator: showsActivityIndicator,
+            htmlArtifacts: presentation.widgets(for: message),
+            htmlActionTarget: controller.htmlActionTarget,
+            turnTiming: presentation.turnTimings[message.id],
+            findHighlights: find.highlights[message.id],
+            onFork: forkAction(for: message)
+        )
+        .equatable()
+        .background {
+            ChatMessageScrollAnchor(messageID: message.id)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func forkAction(for message: ChatMessage) -> (() -> Void)? {
+        guard message.role == .user,
+              let session = controller as? SessionController,
+              model.agent(for: session) == nil else { return nil }
+        return { Task { await session.forkFromMessage(id: message.id) } }
+    }
+
+    @ViewBuilder
+    func toolGroup(_ group: ToolPresentationGroup, presentation: TranscriptToolPresentation) -> some View {
+        if group.messageIDs.contains(where: { find.highlights[$0] != nil }) {
+            ForEach(group.content) { content in
+                switch content {
+                case .message(let message):
+                    messageRow(message, presentation: presentation)
+                case .tools(_, let tools):
+                    ToolGroupView(tools: tools, projectPath: controller.transcriptProjectPath)
+                        .padding(.leading, 36)
+                        .padding(.trailing, 18)
+                        .padding(.vertical, 6)
+                case .anchor(let messageID):
+                    ChatMessageScrollAnchor(messageID: messageID).frame(height: 0)
+                }
+            }
+        } else {
+            ToolActivityView(
+                group: group,
+                projectPath: controller.transcriptProjectPath,
+                activityText: activityText,
+                theme: theme,
+                textStyle: model.textStyle,
+                showThinkingTraces: model.showThinkingTraces,
+                highlightedMessageID: highlightedMessageID,
+                htmlArtifacts: presentation.htmlArtifacts,
+                htmlActionTarget: controller.htmlActionTarget
+            )
+        }
+    }
+
     func sendHTMLMessage(_ text: String) {
         guard let target = controller.htmlActionTarget else { return }
         Task { await target.sendHTMLWidgetMessage(text) }
@@ -294,8 +394,12 @@ struct ToolPresentationGroup: Hashable {
 }
 
 private enum TranscriptPresentationItem: Identifiable {
-    case message(ChatMessage)
+    case message(ChatMessage, showsActivityIndicator: Bool = true)
     case toolGroup(ToolPresentationGroup)
+    /// A run of tools in the turn the agent is working on.
+    case activeTools(id: String, tools: [ToolDisplay])
+    /// The activity indicator that ends the turn the agent is working on.
+    case activity(id: String)
     case htmlArtifact(HTMLArtifact)
     case userTools(messageID: String, tools: [ToolDisplay])
     case backgroundJobResult(ChatMessage)
@@ -303,8 +407,10 @@ private enum TranscriptPresentationItem: Identifiable {
 
     var id: String {
         switch self {
-        case .message(let message): return "message-\(message.id)"
+        case .message(let message, _): return "message-\(message.id)"
         case .toolGroup(let group): return group.id
+        case .activeTools(let id, _): return id
+        case .activity(let id): return id
         case .htmlArtifact(let artifact): return "html-artifact-\(artifact.id)"
         case .userTools(let messageID, _): return "user-tools-\(messageID)"
         case .backgroundJobResult(let message): return "background-job-\(message.id)"
@@ -524,7 +630,19 @@ private struct TranscriptToolPresentation {
         }
 
         for message in visibleMessages {
-            if let group = groupByHostMessageID[message.id] {
+            if let group = groupByHostMessageID[message.id], group.isActive {
+                // The working turn renders as transcript rows, not inside a
+                // tool group, so its reply keeps the same view when the turn
+                // ends and the rows before it fold into the group.
+                for content in group.content {
+                    switch content {
+                    case .message(let message): items.append(.message(message, showsActivityIndicator: false))
+                    case .tools(let id, let tools): items.append(.activeTools(id: id, tools: tools))
+                    case .anchor(let messageID): items.append(.anchor(messageID))
+                    }
+                }
+                items.append(.activity(id: "activity-\(group.id)"))
+            } else if let group = groupByHostMessageID[message.id] {
                 items.append(.toolGroup(group))
                 // Legacy output and widgets whose markers were omitted still
                 // have a fallback. Referenced widgets render only in the reply.
@@ -557,7 +675,7 @@ private struct TranscriptToolPresentation {
 
         var footerHostBySegment: [String: String] = [:]
         for item in items {
-            if case .message(let message) = item, message.role == .assistant,
+            if case .message(let message, _) = item, message.role == .assistant,
                let segment = segmentByMessageID[message.id] {
                 footerHostBySegment[segment] = message.id
             }
@@ -618,6 +736,8 @@ struct ChatMessageRow: View, Equatable {
     var htmlArtifacts: [String: HTMLArtifact] = [:]
     var htmlActionTarget: SessionController? = nil
     var turnTiming: TurnTiming? = nil
+    var findHighlights: ChatFindMessageHighlights? = nil
+    var onFork: (() -> Void)? = nil
     @State private var hovering = false
     @State private var copied = false
 
@@ -632,7 +752,9 @@ struct ChatMessageRow: View, Equatable {
         lhs.showsActivityIndicator == rhs.showsActivityIndicator &&
         lhs.htmlArtifacts == rhs.htmlArtifacts &&
         lhs.htmlActionTarget === rhs.htmlActionTarget &&
-        lhs.turnTiming == rhs.turnTiming
+        lhs.turnTiming == rhs.turnTiming &&
+        lhs.findHighlights == rhs.findHighlights &&
+        (lhs.onFork == nil) == (rhs.onFork == nil)
     }
 
     var body: some View {
@@ -658,6 +780,7 @@ struct ChatMessageRow: View, Equatable {
             if message.canonicalText?.isEmpty == false || !message.text.isEmpty {
                 HStack(alignment: .bottom, spacing: 6) {
                     Spacer(minLength: 72)
+                    if onFork != nil, !message.isStreaming { forkButton }
                     copyButton
                     messageText
                         .padding(.horizontal, 14)
@@ -730,21 +853,37 @@ struct ChatMessageRow: View, Equatable {
         .onHover { hovering = $0 }
     }
 
+    private func hoverActionIcon(_ symbol: String, color: Color) -> some View {
+        Image(systemName: symbol)
+            .font(AppFonts.ui(11, weight: .semibold))
+            .foregroundStyle(color)
+            .frame(width: 28, height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(appTheme.panel.opacity(0.94))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(appTheme.line.opacity(0.7), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+    }
+
+    private var forkButton: some View {
+        Button { onFork?() } label: {
+            hoverActionIcon("arrow.triangle.branch", color: appTheme.muted)
+        }
+        .buttonStyle(.plain)
+        .opacity(hovering ? 1 : 0)
+        .allowsHitTesting(hovering)
+        .animation(.easeInOut(duration: 0.12), value: hovering)
+        .help("Fork a new chat from this message")
+        .accessibilityLabel("Fork from this message")
+    }
+
     private var copyButton: some View {
         Button { copyMessage() } label: {
-            Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                .font(AppFonts.ui(11, weight: .semibold))
-                .foregroundStyle(copied ? appTheme.good : appTheme.muted)
-                .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(appTheme.panel.opacity(0.94))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(appTheme.line.opacity(0.7), lineWidth: 1)
-                )
-                .contentShape(Rectangle())
+            hoverActionIcon(copied ? "checkmark" : "doc.on.doc", color: copied ? appTheme.good : appTheme.muted)
         }
         .buttonStyle(.plain)
         .opacity(hovering || copied ? 1 : 0)
@@ -804,6 +943,7 @@ struct ChatMessageRow: View, Equatable {
     private var messageText: some View {
         if let canonicalText = message.canonicalText {
             NativeMarkdownView(
+                findHighlights: findHighlights,
                 markdown: canonicalText,
                 role: message.role,
                 theme: theme,
@@ -814,6 +954,7 @@ struct ChatMessageRow: View, Equatable {
             )
         } else if !message.text.isEmpty {
             NativeMarkdownView(
+                findHighlights: findHighlights,
                 markdown: message.text, role: message.role, theme: theme,
                 isStreaming: message.isStreaming, projectPath: projectPath, textStyle: textStyle,
                 htmlArtifacts: htmlArtifacts,

@@ -118,7 +118,7 @@ struct GlowDialogRequest: Identifiable {
     var textInput: TextInput? = nil
     var confirmTitle: String
     var role: Role = .normal
-    var cancelTitle: String = "Cancel"
+    var cancelTitle: String? = "Cancel"
     /// Receives the text field's value, or "" when there is no text field.
     var onConfirm: (String) -> Void
     var onCancel: () -> Void = {}
@@ -175,9 +175,11 @@ struct GlowDialogView: View {
                 }
                 HStack(spacing: 8) {
                     Spacer()
-                    Button(request.cancelTitle, action: cancel)
-                        .buttonStyle(GlowButtonStyle(kind: .secondary))
-                        .keyboardShortcut(.cancelAction)
+                    if let cancelTitle = request.cancelTitle {
+                        Button(cancelTitle, action: cancel)
+                            .buttonStyle(GlowButtonStyle(kind: .secondary))
+                            .keyboardShortcut(.cancelAction)
+                    }
                     Button(request.confirmTitle, action: confirm)
                         .buttonStyle(GlowButtonStyle(kind: request.role == .destructive ? .destructive : .primary))
                         .keyboardShortcut(.defaultAction)

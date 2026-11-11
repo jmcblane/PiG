@@ -84,11 +84,29 @@ enum ProcessRunner {
             process.standardError = pipe
             try process.run()
             let handle = pipe.fileHandleForReading
+            var pending = Data()
             while true {
                 let data = handle.availableData
                 if data.isEmpty { break }
-                let text = String(data: data, encoding: .utf8) ?? ""
+                pending.append(data)
+                var end = pending.endIndex
+                if let start = pending.lastIndex(where: { $0 & 0xC0 != 0x80 }) {
+                    let length: Int
+                    switch pending[start] {
+                    case 0xC2...0xDF: length = 2
+                    case 0xE0...0xEF: length = 3
+                    case 0xF0...0xF4: length = 4
+                    default: length = 1
+                    }
+                    if pending.distance(from: start, to: end) < length { end = start }
+                }
+                let text = String(decoding: pending[..<end], as: UTF8.self)
+                pending.removeSubrange(..<end)
                 if !text.isEmpty { await MainActor.run { onChunk(text) } }
+            }
+            if !pending.isEmpty {
+                let text = String(decoding: pending, as: UTF8.self)
+                await MainActor.run { onChunk(text) }
             }
             process.waitUntilExit()
             return process.terminationStatus

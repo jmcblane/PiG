@@ -138,10 +138,9 @@ enum PiResourceService {
     }
 }
 
-struct PiResourcesPopoverView: View {
+struct PiResourcesView: View {
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
     @State private var resources: [PiResourceItem] = []
     @State private var query = ""
     @FocusState private var queryFocused: Bool
@@ -200,18 +199,15 @@ struct PiResourcesPopoverView: View {
                 }
                 .buttonStyle(InlineIconButtonStyle())
                 .disabled(!model.canReloadCurrentSessionRuntime)
-                .help("Reload current session runtime")
+                .help("Reload current chat runtime")
+                .accessibilityLabel("Reload current chat runtime")
                 Button { model.reloadAllIdleSessionRuntimes() } label: {
                     Image(systemName: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(InlineIconButtonStyle())
                 .disabled(!model.canReloadAnyIdleSessionRuntime)
-                .help("Reload all idle session runtimes")
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(InlineIconButtonStyle())
-                .help("Close")
+                .help("Reload all idle chat runtimes")
+                .accessibilityLabel("Reload all idle chat runtimes")
             }
 
             HStack(spacing: 8) {
@@ -265,12 +261,11 @@ struct PiResourcesPopoverView: View {
                     }
                     .padding(.vertical, 2)
                 }
-                .frame(height: 430)
+                .frame(maxHeight: .infinity)
             }
         }
-        .padding(14)
-        .frame(width: 460)
-        .background(appTheme.panel)
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task { await load() }
     }
 
@@ -279,7 +274,6 @@ struct PiResourcesPopoverView: View {
         errorText = nil
         do {
             resources = try await PiResourceService.list()
-            model.updateSessionLaunchExtensions(from: resources)
         } catch {
             errorText = error.localizedDescription
         }
@@ -293,7 +287,6 @@ struct PiResourcesPopoverView: View {
         Task {
             do {
                 resources = try await PiResourceService.setEnabled(item, enabled: next)
-                model.updateSessionLaunchExtensions(from: resources)
                 model.invalidateSlashCommandCatalog()
                 errorText = nil
             } catch {
@@ -494,6 +487,7 @@ private struct PiResourceRow: View {
                 .allowsHitTesting(hovering || pinned)
                 .padding(.trailing, 5)
                 .help(pinned ? "Unpin resource" : "Pin resource")
+                .accessibilityLabel(pinned ? "Unpin resource" : "Pin resource")
             }
         }
         .onHover { hovering = $0 }

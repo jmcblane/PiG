@@ -92,12 +92,14 @@ struct AgentsSettingsView: View {
                 .buttonStyle(.plain)
                 .disabled(index == 0)
                 .help("Move up")
+                .accessibilityLabel("Move up")
                 Button {
                     model.moveAgent(agent.id, relativeTo: model.agents[index + 1].id, after: true)
                 } label: { MoveIcon(symbol: "arrow.down") }
                 .buttonStyle(.plain)
                 .disabled(index == model.agents.count - 1)
                 .help("Move down")
+                .accessibilityLabel("Move down")
                 Button("Edit…") { model.requestEditAgent(agent.id, fromSettings: true) }
                     .buttonStyle(GlowButtonStyle())
                 Button("Remove…") { requestRemoval(agent) }

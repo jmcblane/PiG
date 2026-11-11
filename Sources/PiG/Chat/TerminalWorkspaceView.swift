@@ -229,6 +229,7 @@ private struct TerminalTabStrip: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(appTheme.secondaryText)
+            .accessibilityLabel("New terminal tab")
             .padding(.leading, 2)
 
             Spacer(minLength: 0)
@@ -292,6 +293,7 @@ private struct TerminalTabItem: View {
             .buttonStyle(.plain)
             .foregroundStyle(appTheme.muted)
             .opacity(isActive || hovering ? 1 : 0)
+            .accessibilityLabel("Close terminal tab")
             .padding(.trailing, 6)
         }
         .frame(maxHeight: .infinity)

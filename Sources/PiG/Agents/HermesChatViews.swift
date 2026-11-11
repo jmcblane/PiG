@@ -55,6 +55,7 @@ struct HermesComposerView: View {
                     .buttonStyle(SendButtonStyle(active: controller.isWorking))
                     .disabled(!controller.isWorking && !canSubmit)
                     .help(controller.isWorking ? "Stop" : "Send")
+                    .accessibilityLabel(controller.isWorking ? "Stop" : "Send")
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 12)

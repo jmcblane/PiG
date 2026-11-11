@@ -12,7 +12,6 @@ struct CastBar: View {
             WindowDragArea()
             HStack(spacing: 0) {
                 Color.clear.frame(width: 78)
-                InboxToggleButton()
                 CastFilesButton()
                 CastRoomButton()
                 NewChatButtons()
@@ -35,64 +34,16 @@ private struct NewChatButtons: View {
                 Image(systemName: "square.and.pencil")
             }
             .buttonStyle(TitlebarIconButtonStyle())
-            .help(model.sessionLaunchExtensions.isEmpty ? "New chat (⌘N)" : "New chat (⌘N) — right-click for more")
-            .contextMenu { NewChatMenuItems() }
+            .help("New chat (⌘N)")
+            .accessibilityLabel("New chat")
 
             Button { model.showNewChatHome(quickChat: true) } label: {
                 Image(systemName: "bolt.fill")
             }
             .buttonStyle(TitlebarIconButtonStyle())
-            .help(model.sessionLaunchExtensions.isEmpty ? "New quick chat (⇧⌘N)" : "New quick chat (⇧⌘N) — right-click for more")
-            .contextMenu { NewQuickChatMenuItems() }
+            .help("New quick chat (⇧⌘N)")
+            .accessibilityLabel("New quick chat")
         }
-    }
-}
-
-struct NewChatMenuItems: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        if let path = model.selectedProject?.path {
-            Button("New Chat in \(model.projectDisplayName(for: path))", systemImage: "square.and.pencil") {
-                model.showNewChatHome(projectPath: path)
-            }
-            ForEach(model.sessionLaunchExtensions) { item in
-                Button("New Chat with \(item.displayName)", systemImage: "puzzlepiece.extension") {
-                    model.newSession(projectPath: path, extensionPaths: [item.path])
-                }
-            }
-        }
-        if !model.agents.isEmpty {
-            Divider()
-            ForEach(model.agents) { agent in
-                Button("Chat with \(agent.name)") { model.selectAgent(agent.id) }
-            }
-        }
-    }
-}
-
-struct NewQuickChatMenuItems: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        Button("New Quick Chat", systemImage: "bolt.fill") { model.showNewChatHome(quickChat: true) }
-        ForEach(model.sessionLaunchExtensions) { item in
-            Button("New Quick Chat with \(item.displayName)", systemImage: "puzzlepiece.extension") {
-                model.newQuickChat(extensionPaths: [item.path])
-            }
-        }
-    }
-}
-
-private struct InboxToggleButton: View {
-    @AppStorage(InboxColumn.visibilityKey) private var visible = true
-
-    var body: some View {
-        Button { withAnimation(.smooth(duration: 0.22)) { visible.toggle() } } label: {
-            Image(systemName: "sidebar.left")
-        }
-        .buttonStyle(TitlebarIconButtonStyle(active: visible))
-        .help(visible ? "Collapse open chats (⌘S)" : "Expand open chats (⌘S)")
     }
 }
 
@@ -169,6 +120,7 @@ private struct CastFilesButton: View {
         .buttonStyle(TitlebarIconButtonStyle())
         .disabled(projectPath == nil)
         .help("Files")
+        .accessibilityLabel("Files")
         .padding(.trailing, 4)
         .popover(isPresented: $open, arrowEdge: .bottom) {
             Group {
@@ -196,37 +148,18 @@ private struct CastTrailingControls: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Button {
-                NotificationCenter.default.post(name: .pigOpenPalette, object: nil)
-            } label: {
-                Image(systemName: "magnifyingglass")
-            }
-            .buttonStyle(TitlebarIconButtonStyle())
-            .help("Go to anything (⌘K)")
             Group {
                 AppUpdateButton(updates: model.appUpdates)
                 PiUpdateButton(maintenance: model.piMaintenance)
             }
             .buttonStyle(.plain)
             .font(AppFonts.ui(12.5, weight: .semibold))
-            Button {
-                model.showingPiResources = true
-            } label: {
-                Image(systemName: "puzzlepiece.extension")
-            }
-            .buttonStyle(TitlebarIconButtonStyle())
-            .help("Extensions & Resources")
-            .popover(isPresented: $model.showingPiResources, arrowEdge: .bottom) {
-                PiResourcesPopoverView()
-                    .environmentObject(model)
-                    .glowPresentationBackground()
-            }
             TitlebarTerminalButton()
-            SessionStatisticsToolbarButton()
-            SessionTreeToolbarButton()
+                .padding(.leading, 10)
             CustomActionsToolbarButton()
         }
         .fixedSize()
+        .background(alignment: .trailing) { SessionTreePopoverAnchor() }
     }
 }
 

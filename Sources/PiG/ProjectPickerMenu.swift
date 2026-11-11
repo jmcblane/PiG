@@ -17,6 +17,7 @@ struct ProjectPickerMenu: View {
 
     @State private var searchText = ""
     @State private var hoveredAgentID: String?
+    @State private var hoveredHeader: String?
 
     private var menuAgents: [Agent] {
         model.agents.filter { normalizedSearch.isEmpty || "\($0.name) \($0.role)".lowercased().contains(normalizedSearch) }
@@ -61,6 +62,7 @@ struct ProjectPickerMenu: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(appTheme.muted)
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, 10)
@@ -71,7 +73,12 @@ struct ProjectPickerMenu: View {
 
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
-                    columnHeader("Agents")
+                    columnHeader("Agents") {
+                        headerButton("gearshape", help: "Agent settings") {
+                            dismiss()
+                            SettingsTab.open(.agents)
+                        }
+                    }
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(menuAgents) { agent in agentRow(agent) }
@@ -81,7 +88,7 @@ struct ProjectPickerMenu: View {
                         }
                         .padding(.vertical, 5)
                     }
-                    .frame(height: 365)
+                    .frame(height: 420)
                 }
                 .frame(width: width / 2)
                 .overlay(alignment: .trailing) {
@@ -91,43 +98,24 @@ struct ProjectPickerMenu: View {
                 }
 
                 VStack(alignment: .leading, spacing: 0) {
-                    columnHeader("Projects")
+                    columnHeader("Projects") {
+                        headerButton("folder.badge.plus", help: "Add existing project…") {
+                            dismiss()
+                            model.addExistingProject()
+                        }
+                        headerButton("plus.square", help: "Create project directory…") {
+                            dismiss()
+                            model.createProject()
+                        }
+                    }
                     ScrollView {
                         projectList
                             .padding(.vertical, 5)
                     }
-                    .frame(height: 365)
+                    .frame(height: 420)
                 }
                 .frame(width: width / 2)
             }
-
-            PopoverMenuDivider()
-
-            HStack(alignment: .top, spacing: 0) {
-                VStack(spacing: 0) {
-                    PopoverPickerRow(title: "New Pi Agent…", icon: "person.badge.plus", checkmarkColumn: false) {
-                        dismiss()
-                        model.requestNewAgent(backend: .pi)
-                    }
-                    PopoverPickerRow(title: "New Hermes Agent…", icon: "antenna.radiowaves.left.and.right", checkmarkColumn: false) {
-                        dismiss()
-                        model.requestNewAgent(backend: .hermes)
-                    }
-                }
-                .frame(width: width / 2)
-                VStack(spacing: 0) {
-                    PopoverPickerRow(title: "Add Existing Project…", icon: "folder.badge.plus", checkmarkColumn: false) {
-                        dismiss()
-                        model.addExistingProject()
-                    }
-                    PopoverPickerRow(title: "Create Project Directory…", icon: "plus.square", checkmarkColumn: false) {
-                        dismiss()
-                        model.createProject()
-                    }
-                }
-                .frame(width: width / 2)
-            }
-            .padding(.bottom, 5)
         }
         .frame(width: width)
         .onAppear {
@@ -151,13 +139,33 @@ struct ProjectPickerMenu: View {
         )
     }
 
-    private func columnHeader(_ title: String) -> some View {
-        Text(title)
-            .font(AppFonts.ui(11, weight: .semibold))
-            .foregroundStyle(appTheme.muted)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .accessibilityAddTraits(.isHeader)
+    private func columnHeader<Actions: View>(_ title: String, @ViewBuilder actions: () -> Actions) -> some View {
+        HStack(spacing: 0) {
+            Text(title)
+                .font(AppFonts.ui(11, weight: .semibold))
+                .foregroundStyle(appTheme.muted)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            actions()
+                .opacity(hoveredHeader == title ? 1 : 0)
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 4)
+        .frame(height: 29)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if hovering { hoveredHeader = title } else if hoveredHeader == title { hoveredHeader = nil }
+        }
+    }
+
+    private func headerButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(InlineIconButtonStyle())
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private func emptyMessage(_ message: String) -> some View {
@@ -257,6 +265,7 @@ struct ProjectPickerMenu: View {
                 .opacity(rowHovering ? 1 : 0)
                 .allowsHitTesting(rowHovering)
                 .help(project.isPinned ? "Unpin project" : "Pin project")
+                .accessibilityLabel(project.isPinned ? "Unpin project" : "Pin project")
             }
         } else {
             PopoverPickerRow(

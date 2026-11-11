@@ -33,14 +33,14 @@ final class AppUpdateChecker: ObservableObject {
     func check(manual: Bool) async {
         guard !isChecking else { return }
         guard let currentVersion else {
-            if manual { showAlert("Update checks need the bundled app", info: "Build PiG with scripts/build-app.sh to check for updates.") }
+            if manual { showMessage("Update checks need the bundled app", info: "Build PiG with scripts/build-app.sh to check for updates.") }
             return
         }
         isChecking = true
         defer { isChecking = false }
 
         let latest = await Self.fetchLatest()
-        if let latest, Self.isNewer(latest.version, than: currentVersion) {
+        if let latest, isNewerVersion(latest.version, than: currentVersion) {
             available = latest
         } else if latest != nil {
             available = nil
@@ -48,16 +48,17 @@ final class AppUpdateChecker: ObservableObject {
         guard manual else { return }
 
         if let available {
-            let alert = NSAlert()
-            alert.messageText = "PiG \(available.version) is available"
-            alert.informativeText = "You have PiG \(currentVersion)."
-            alert.addButton(withTitle: "Download")
-            alert.addButton(withTitle: "Later")
-            if alert.runModal() == .alertFirstButtonReturn { download() }
+            present(GlowDialogRequest(
+                title: "PiG \(available.version) is available",
+                message: "You have PiG \(currentVersion).",
+                confirmTitle: "Download",
+                cancelTitle: "Later",
+                onConfirm: { [weak self] _ in self?.download() }
+            ))
         } else if latest != nil {
-            showAlert("PiG is up to date", info: "PiG \(currentVersion) is the latest version.")
+            showMessage("PiG is up to date", info: "PiG \(currentVersion) is the latest version.")
         } else {
-            showAlert("Couldn’t check for updates", info: "GitHub could not be reached. Try again later.")
+            showMessage("Couldn’t check for updates", info: "GitHub could not be reached. Try again later.")
         }
     }
 
@@ -72,15 +73,12 @@ final class AppUpdateChecker: ObservableObject {
         UserDefaults.standard.set(available.version, forKey: Self.dismissedKey)
     }
 
-    private func showAlert(_ message: String, info: String) {
-        let alert = NSAlert()
-        alert.messageText = message
-        alert.informativeText = info
-        alert.runModal()
+    private func showMessage(_ title: String, info: String) {
+        present(GlowDialogRequest(title: title, message: info, confirmTitle: "OK", cancelTitle: nil, onConfirm: { _ in }))
     }
 
-    static func isNewer(_ candidate: String, than current: String) -> Bool {
-        candidate.compare(current, options: .numeric) == .orderedDescending
+    private func present(_ request: GlowDialogRequest) {
+        NotificationCenter.default.post(name: .pigPresentDialog, object: request)
     }
 
     private struct LatestRelease: Decodable {

@@ -5,6 +5,10 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case general
     case models
     case agents
+    case pi
+    case extensions
+
+    static let storageKey = "PiG.settingsTab"
 
     var id: String { rawValue }
 
@@ -13,6 +17,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: return "General"
         case .models: return "Models"
         case .agents: return "Agents"
+        case .pi: return "Pi"
+        case .extensions: return "Extensions"
         }
     }
 
@@ -21,14 +27,25 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: return "gearshape"
         case .models: return "cpu"
         case .agents: return "person.2"
+        case .pi: return "shippingbox"
+        case .extensions: return "puzzlepiece.extension"
         }
     }
+
+    static func open(_ tab: SettingsTab) {
+        UserDefaults.standard.set(tab.rawValue, forKey: storageKey)
+        NotificationCenter.default.post(name: .pigOpenSettings, object: nil)
+    }
+}
+
+extension Notification.Name {
+    static let pigOpenSettings = Notification.Name("pigOpenSettings")
 }
 
 /// Settings window content: a centered tab strip over the selected tab, on the window's glow backdrop.
 struct SettingsWindowView: View {
     @Environment(\.appTheme) private var appTheme
-    @AppStorage("PiG.settingsTab") private var tab = SettingsTab.general
+    @AppStorage(SettingsTab.storageKey) private var tab = SettingsTab.general
 
     var body: some View {
         VStack(spacing: 0) {
@@ -84,6 +101,8 @@ struct SettingsWindowView: View {
         case .general: GeneralSettingsView()
         case .models: ModelsSettingsView()
         case .agents: AgentsSettingsView()
+        case .pi: PiSettingsView()
+        case .extensions: PiResourcesView()
         }
     }
 }

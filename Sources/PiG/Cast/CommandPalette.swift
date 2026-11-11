@@ -17,7 +17,7 @@ enum PaletteScope: String, CaseIterable {
         switch self {
         case .all: return "Everything"
         case .chats: return "Open chats"
-        case .sessions: return "Sessions"
+        case .sessions: return "All chats"
         case .agents: return "Agents"
         case .projects: return "Projects"
         case .files: return "Files"
@@ -44,7 +44,7 @@ enum PaletteScope: String, CaseIterable {
         switch self {
         case .all: return ""
         case .chats: return "open"
-        case .sessions: return "session"
+        case .sessions: return "chat"
         case .agents: return "agent"
         case .projects: return "project"
         case .files: return "file"
@@ -455,7 +455,7 @@ struct CommandPalette: View {
             if controller.sessionPath != nil, !controller.showsActivityIndicator {
                 add("rename", "Rename Chat…", "pencil") { model.requestSessionRename(controller) }
             }
-            add("tree", "Session Tree", "point.3.connected.trianglepath.dotted", keywords: "fork branch history") {
+            add("tree", "Chat Tree", "point.3.connected.trianglepath.dotted", keywords: "fork branch history") {
                 model.showingSessionTree = true
             }
         }
@@ -466,20 +466,20 @@ struct CommandPalette: View {
             add("undo-done", "Reopen “\(title)”", "arrow.uturn.backward", keywords: "undo done") { model.undoLastInboxDismissal() }
         }
         add("terminal", "Toggle Terminal", "terminal") { post(.pigToggleTerminal) }
-        add("terminal-full", "Fullscreen Terminal", "rectangle.inset.filled", shortcut: "⇧⌘F") { post(.pigToggleFullscreenTerminal) }
+        add("terminal-full", "Fullscreen Terminal", "rectangle.inset.filled", shortcut: "⌥⌘F") { post(.pigToggleFullscreenTerminal) }
         add("terminal-vertical", "Vertical Terminal Split", "rectangle.split.2x1", shortcut: "⌘D") { post(.pigShowVerticalTerminalSplit) }
         add("terminal-horizontal", "Horizontal Terminal Split", "rectangle.split.1x2", shortcut: "⇧⌘D") { post(.pigShowHorizontalTerminalSplit) }
         add("terminal-tab", "New Terminal Tab", "plus.rectangle") { post(.pigNewTerminalTab) }
-        add("resources", "Extensions & Resources", "puzzlepiece.extension", keywords: "skills") { model.showingPiResources = true }
+        add("resources", "Extensions & Resources", "puzzlepiece.extension", keywords: "skills") { SettingsTab.open(.extensions) }
         add("thinking-traces", model.showThinkingTraces ? "Hide Thinking Traces" : "Show Thinking Traces", "text.bubble") {
             model.showThinkingTraces.toggle()
         }
-        add("refresh-sessions", "Refresh Sessions", "arrow.triangle.2.circlepath", keywords: "rescan reload list") {
+        add("refresh-sessions", "Refresh Chats", "arrow.triangle.2.circlepath", keywords: "rescan reload list") {
             model.refreshSessions()
             model.loadSessionArchive()
         }
-        add("reload-idle", "Reload All Idle Session Runtimes", "arrow.clockwise") { model.reloadAllIdleSessionRuntimes() }
-        add("unload-idle", "Unload All Idle Sessions", "moon.zzz") { model.unloadAllIdleSessions() }
+        add("reload-idle", "Reload All Idle Chat Runtimes", "arrow.clockwise") { model.reloadAllIdleSessionRuntimes() }
+        add("unload-idle", "Unload All Idle Chats", "moon.zzz") { model.unloadAllIdleSessions() }
         add("pi-updates", "Pi Updates…", "arrow.down.circle") {
             model.piMaintenance.presentUpdates(
                 cwd: model.selectedController?.projectPath ?? model.selectedProjectPath ?? PiPaths.home.path,

@@ -71,6 +71,7 @@ enum HTMLWidgetDocument {
             --pig-muted: \(palette.muted.hex); --pig-accent: \(palette.accent.hex);
             --pig-panel: \(palette.panel.hex); --pig-border: \(palette.line.hex);
             --pig-control-bg: \(palette.panel2.hex); --pig-accent-fg: \(accentForeground);
+            --pig-good: \(palette.good.hex); --pig-danger: \(palette.danger.hex);
           }
           * { box-sizing: border-box; }
           html, body { margin: 0; padding: 0; min-height: 0; height: auto; background: var(--pig-bg); }

@@ -201,7 +201,7 @@ final class HermesSession {
                     }
                     failures = 0
                     self.notice = self.status == .waiting && self.prompt == nil
-                        ? "Hermes is waiting for approval, but the API has not supplied a request ID. Check the remote session; no approval was sent."
+                        ? "Hermes is waiting for approval, but the API has not supplied a request ID. Check the remote chat; no approval was sent."
                         : nil
                 } catch {
                     if Task.isCancelled { self.busy = false; break }

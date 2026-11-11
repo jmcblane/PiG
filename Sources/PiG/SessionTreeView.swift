@@ -1,7 +1,7 @@
 import SwiftUI
 
-struct SessionTreeToolbarButton: View {
-    @Environment(\.appTheme) private var appTheme
+/// Anchors the chat tree popover, opened from the command palette or `/tree`.
+struct SessionTreePopoverAnchor: View {
     @EnvironmentObject private var model: AppModel
 
     /// Agent chats are linear: no tree, fork, or clone.
@@ -10,43 +10,23 @@ struct SessionTreeToolbarButton: View {
     }
 
     var body: some View {
-        if isAgentChat {
-            // Keeps `/tree` from leaving the popover flag set while it can't be shown.
-            Color.clear
-                .frame(width: 0, height: 0)
-                .onChange(of: model.showingSessionTree, initial: true) { _, showing in
-                    if showing { model.showingSessionTree = false }
+        Color.clear
+            .frame(width: 1, height: 20)
+            .popover(isPresented: $model.showingSessionTree, arrowEdge: .bottom) {
+                Group {
+                    if let controller = model.selectedController {
+                        SessionTreeLensView(controller: controller)
+                            .environmentObject(model)
+                            .environment(\.appTheme, AppTheme(choice: model.selectedTheme))
+                    }
                 }
-        } else {
-            treeButton
-        }
-    }
-
-    private var treeButton: some View {
-        Button {
-            model.showingSessionTree.toggle()
-        } label: {
-            Image(systemName: "arrow.triangle.branch")
-                .font(AppFonts.ui(12.5, weight: .semibold))
-                .foregroundStyle(model.showingSessionTree ? appTheme.brass : appTheme.text)
-                .frame(width: 24, height: 20)
-                .background(model.showingSessionTree ? appTheme.panel2.opacity(0.9) : Color.clear)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(model.selectedController == nil)
-        .help("Fork session")
-        .popover(isPresented: $model.showingSessionTree, arrowEdge: .bottom) {
-            if let controller = model.selectedController {
-                SessionTreeLensView(controller: controller)
-                    .environmentObject(model)
-                    .environment(\.appTheme, AppTheme(choice: model.selectedTheme))
-                    .glowPresentationBackground()
+                .glowPresentationBackground()
             }
-        }
-        .onChange(of: model.selectedControllerID) { _, _ in
-            model.showingSessionTree = false
-        }
+            .onChange(of: model.showingSessionTree, initial: true) { _, showingTree in
+                if showingTree && (isAgentChat || model.selectedController == nil) { model.showingSessionTree = false }
+            }
+            .onChange(of: model.selectedControllerID) { _, _ in model.showingSessionTree = false }
+            .onChange(of: model.selectedHermesChatID) { _, _ in model.showingSessionTree = false }
     }
 }
 
@@ -130,7 +110,7 @@ private struct SessionTreeLensView: View {
             Image(systemName: "arrow.triangle.branch")
                 .font(AppFonts.ui(13, weight: .semibold))
                 .foregroundStyle(appTheme.brass)
-            Text("Session Tree")
+            Text("Chat Tree")
                 .font(AppFonts.heading(14, weight: .semibold))
                 .foregroundStyle(appTheme.text)
             Spacer()
@@ -145,7 +125,8 @@ private struct SessionTreeLensView: View {
             .buttonStyle(.plain)
             .foregroundStyle(appTheme.muted)
             .disabled(controller.sessionTreeLoadState == .loading)
-            .help("Refresh session tree")
+            .help("Refresh chat tree")
+            .accessibilityLabel("Refresh chat tree")
         }
         .padding(.leading, 14)
         .padding(.trailing, 8)
@@ -196,13 +177,13 @@ private struct SessionTreeLensView: View {
                         .padding(.vertical, 8)
                     }
                 } else {
-                    Text("No conversation messages")
+                    Text("No chat messages")
                         .font(AppFonts.ui(12.5))
                         .foregroundStyle(appTheme.muted)
                         .frame(maxWidth: .infinity, minHeight: 150)
                 }
             } else {
-                Text("No session entries")
+                Text("No chat entries")
                     .font(AppFonts.ui(12.5))
                     .foregroundStyle(appTheme.muted)
                     .frame(maxWidth: .infinity, minHeight: 150)
@@ -452,7 +433,7 @@ private struct SessionTreeLensView: View {
         }
         .buttonStyle(.plain)
         .disabled(controller.isForking || !controller.isAgentSettled || controller.showsActivityIndicator)
-        .help("Fork a new session from this prompt")
+        .help("Fork a new chat from this prompt")
         .accessibilityLabel("Fork from: \(node.preview.oneLine(max: 80))")
     }
 
@@ -540,7 +521,7 @@ private extension SessionTreeEntryKind {
         case .branchSummary: return "Branch summary"
         case .label: return "Label"
         case .custom: return "Custom"
-        case .sessionInfo: return "Session info"
+        case .sessionInfo: return "Chat info"
         case .unknown: return "Entry"
         }
     }

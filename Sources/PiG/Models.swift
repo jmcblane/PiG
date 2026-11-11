@@ -328,7 +328,7 @@ enum SessionNamingModelMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .session: return "Use session’s model"
+        case .session: return "Use chat’s model"
         case .specific: return "Specific model"
         case .apple: return "Apple Intelligence (on-device)"
         }
@@ -378,9 +378,9 @@ enum SessionRuntimePolicy: String, CaseIterable, Identifiable {
     var helpText: String {
         switch self {
         case .hybrid:
-            return "Idle sessions unload after 30 minutes, and at most 3 idle sessions stay loaded. The selected session, quick chats, and busy sessions are never unloaded."
+            return "Idle chats unload after 30 minutes, and at most 3 idle chats stay loaded. The selected chat, quick chats, and busy chats are never unloaded."
         case .manual:
-            return "Sessions stay loaded until you unload them from the View menu."
+            return "Chats stay loaded until you unload them from the Chat menu."
         }
     }
 
@@ -784,6 +784,175 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
+    func rowTitle(projectPath: String?) -> ToolRowTitle {
+        let tool = shortName
+        guard let args = jsonObject(arguments) else {
+            let label = Self.builtinTools.contains(tool) ? tool.capitalized : tool
+            return ToolRowTitle(verb: label, subject: arguments.oneLine(max: 100))
+        }
+        let path = (string(args, "path") ?? string(args, "file_path")).map { Self.displayPath($0, projectPath: projectPath) }
+
+        switch tool {
+        case "read":
+            return ToolRowTitle(verb: "Read", subject: path ?? "file")
+        case "write":
+            return ToolRowTitle(verb: "Write", subject: path ?? "file")
+        case "edit":
+            return ToolRowTitle(verb: "Edit", subject: path ?? "file")
+        case "bash":
+            if let description = string(args, "description")?.nonEmptyTrimmed {
+                return ToolRowTitle(verb: description.oneLine(max: 160), subject: "")
+            }
+            return ToolRowTitle(verb: "Run", subject: (string(args, "command") ?? "shell command").oneLine(max: 200))
+        case "grep":
+            return ToolRowTitle(verb: "Search", subject: string(args, "pattern")?.oneLine(max: 120) ?? "")
+        case "find":
+            return ToolRowTitle(verb: "Find", subject: string(args, "pattern")?.oneLine(max: 120) ?? "")
+        case "ls":
+            return ToolRowTitle(verb: "List", subject: path ?? ".")
+        case "delegate_agent", "subagent":
+            return ToolRowTitle(verb: "Subagent", subject: subagentSummary(args))
+        case "background":
+            return ToolRowTitle(verb: "Background", subject: string(args, "label")?.nonEmptyTrimmed ?? string(args, "tool") ?? "tool")
+        case "codemode":
+            return ToolRowTitle(verb: codemodeComment(args)?.oneLine(max: 100) ?? "Script", subject: "")
+        default:
+            return ToolRowTitle(verb: tool, subject: Self.genericTitle(name: "", args: args).trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    var rowSymbolName: String { Self.symbolName(forTool: shortName) }
+
+    static func symbolName(forTool name: String) -> String {
+        switch name {
+        case "read", "write": return "doc.text"
+        case "edit": return "pencil"
+        case "bash": return "terminal"
+        case "grep", "find", "search", "web_search", "websearch": return "magnifyingglass"
+        case "ls": return "folder"
+        case "subagent", "delegate_agent": return "person.2"
+        case "background": return "clock.arrow.circlepath"
+        case "codemode": return "curlybraces"
+        default: return "wrench.and.screwdriver"
+        }
+    }
+
+    static func displayPath(_ path: String, projectPath: String?) -> String {
+        if let projectPath, !projectPath.isEmpty {
+            let root = projectPath.hasSuffix("/") ? projectPath : projectPath + "/"
+            if path.hasPrefix(root), path.count > root.count { return String(path.dropFirst(root.count)) }
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path + "/"
+        if path.hasPrefix(home) { return "~/" + path.dropFirst(home.count) }
+        return path
+    }
+
+    var rowSummary: ToolRowSummary? {
+        guard status == .succeeded, !isError else {
+            return bashExitCode.map { .text("exit \($0)") }
+        }
+        switch shortName {
+        case "read": return readSummary.map(ToolRowSummary.text)
+        case "edit": return editLineDelta.map { .lineDelta(added: $0.added, removed: $0.removed) }
+        case "write":
+            guard let args = jsonObject(arguments), let content = string(args, "content") else { return nil }
+            return .text(Self.count(splitLines(content).count, "line"))
+        case "bash": return bashExitCode.map { .text("exit \($0)") }
+        case "grep":
+            if result == "No matches found" { return .text("no matches") }
+            let (lines, limited) = listedLines
+            let matches = lines.filter { $0.contains(#/:\d+: /#) }.count
+            return matches > 0 ? .text(Self.count(matches, "match", plural: "matches", limited: limited)) : nil
+        case "find":
+            if result == "No files found matching pattern" { return .text("no files") }
+            let (lines, limited) = listedLines
+            return lines.isEmpty ? nil : .text(Self.count(lines.count, "file", limited: limited))
+        case "ls":
+            if result == "(empty directory)" { return .text("empty") }
+            let (lines, limited) = listedLines
+            return lines.isEmpty ? nil : .text(Self.count(lines.count, "entry", plural: "entries", limited: limited))
+        case "codemode":
+            var parts: [String] = []
+            let calls = codemodeCalls.count
+            if calls > 0 { parts.append(Self.count(calls, "call")) }
+            if let wall = codemodeWallTime { parts.append(wall) }
+            return parts.isEmpty ? nil : .text(parts.joined(separator: ", "))
+        default:
+            return nil
+        }
+    }
+
+    var errorLine: String? {
+        guard status == .failed || isError else { return nil }
+        let lines = result.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard shortName == "bash" else { return lines.first?.oneLine(max: 300) }
+        let output = lines.filter { !$0.hasPrefix("Command exited with code ") && !$0.hasPrefix("Exit: ") }
+        return (output.last ?? lines.last)?.oneLine(max: 300)
+    }
+
+    var bashExitCode: Int? {
+        guard shortName == "bash",
+              let last = result.split(whereSeparator: \.isNewline).last?.trimmingCharacters(in: .whitespaces) else { return nil }
+        for prefix in ["Command exited with code ", "Exit: "] where last.hasPrefix(prefix) {
+            return Int(last.dropFirst(prefix.count))
+        }
+        return nil
+    }
+
+    private var readSummary: String? {
+        guard images.isEmpty, let args = jsonObject(arguments) else { return nil }
+        var body = Substring(result)
+        var total: Int?
+        if let match = result.firstMatch(of: #/\n\n\[Showing lines (\d+)-(\d+) of (\d+)[^\]]*\]\s*$/#) {
+            return "lines \(match.1)–\(match.2) of \(match.3)"
+        }
+        if let match = result.firstMatch(of: #/\n\n\[(\d+) more lines in file[^\]]*\]\s*$/#) {
+            body = result[..<match.range.lowerBound]
+            total = Int(match.1)
+        }
+        guard !body.isEmpty else { return "empty" }
+        let count = splitLines(String(body)).count
+        let start = int(args, "offset") ?? 1
+        let end = start + count - 1
+        if let more = total { return "lines \(start)–\(end) of \(end + more)" }
+        return start > 1 ? "lines \(start)–\(end)" : Self.count(count, "line")
+    }
+
+    private var editLineDelta: (added: Int, removed: Int)? {
+        guard shortName == "edit",
+              let args = jsonObject(arguments),
+              let edits = args["edits"] as? [[String: Any]], !edits.isEmpty else { return nil }
+        var added = 0
+        var removed = 0
+        for edit in edits {
+            guard let oldText = edit["oldText"] as? String, let newText = edit["newText"] as? String else { return nil }
+            for operation in diffOperations(oldLines: splitLines(oldText), newLines: splitLines(newText)) {
+                switch operation {
+                case .insert: added += 1
+                case .delete: removed += 1
+                case .equal: break
+                }
+            }
+        }
+        return (added, removed)
+    }
+
+    private var listedLines: (lines: [Substring], limited: Bool) {
+        var body = Substring(result)
+        var limited = false
+        if let match = result.firstMatch(of: #/\n\n\[([^\]\n]*)\]\s*$/#) {
+            body = result[..<match.range.lowerBound]
+            limited = match.1.contains("limit reached")
+        }
+        return (body.split(whereSeparator: \.isNewline).filter { !$0.allSatisfy(\.isWhitespace) }, limited)
+    }
+
+    private static func count(_ value: Int, _ singular: String, plural: String? = nil, limited: Bool = false) -> String {
+        "\(value)\(limited ? "+" : "") \(value == 1 && !limited ? singular : plural ?? singular + "s")"
+    }
+
     private static let builtinTools: Set<String> = ["read", "write", "edit", "bash", "subagent", "delegate_agent"]
     private static let verbKeys = ["action", "operation"]
     private static let subjectKeys = ["title", "path", "file_path", "reference", "ref", "query", "pattern", "url", "id", "command", "name"]
@@ -824,16 +993,19 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
 
     /// The script's leading `//` comment (skipping `@options`), call count, and wall time.
     private func codemodeTitle(_ args: [String: Any]) -> String {
-        let comment = (string(args, "code") ?? "").split(separator: "\n").lazy
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .prefix { $0.hasPrefix("//") }
-            .first { !$0.hasPrefix("// @options") }
-            .flatMap { String($0.dropFirst(2)).nonEmptyTrimmed }
-        var parts = [comment?.oneLine(max: 100) ?? "Script"]
+        var parts = [codemodeComment(args)?.oneLine(max: 100) ?? "Script"]
         let count = codemodeCalls.count
         if count > 0 { parts.append(count == 1 ? "1 call" : "\(count) calls") }
         if let wall = codemodeWallTime { parts.append(wall) }
         return parts.joined(separator: " · ")
+    }
+
+    private func codemodeComment(_ args: [String: Any]) -> String? {
+        (string(args, "code") ?? "").split(separator: "\n").lazy
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .prefix { $0.hasPrefix("//") }
+            .first { !$0.hasPrefix("// @options") }
+            .flatMap { String($0.dropFirst(2)).nonEmptyTrimmed }
     }
 
     /// Calls a codemode script made, from `details.calls`.
@@ -945,9 +1117,14 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
         switch shortName {
         case "read": return false
         case "write", "edit": return true
-        case "bash": return !result.isEmpty || details?.isEmpty == false
+        case "bash": return !result.isEmpty || details?.isEmpty == false || hasBashDescription
         default: return !arguments.isEmpty || !result.isEmpty || details?.isEmpty == false
         }
+    }
+
+    private var hasBashDescription: Bool {
+        guard let args = jsonObject(arguments) else { return false }
+        return string(args, "description")?.nonEmptyTrimmed != nil && string(args, "command")?.nonEmptyTrimmed != nil
     }
 
     var argumentsObject: [String: Any]? { jsonObject(arguments) }
@@ -969,12 +1146,7 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
             return chainSummary(chain)
         }
         if let tasks = args["tasks"] as? [[String: Any]], !tasks.isEmpty {
-            let labels = tasks.map { item in
-                if let chain = item["chain"] as? [[String: Any]], !chain.isEmpty {
-                    return chainSummary(chain)
-                }
-                return subagentLabel(item)
-            }
+            let labels = tasks.map { subagentLabel($0) }
             return labels.isEmpty ? "agent" : labels.joined(separator: ", ")
         }
         return subagentLabel(args)
@@ -1146,6 +1318,16 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
         default: return String(describing: value!)
         }
     }
+}
+
+struct ToolRowTitle: Hashable, Sendable {
+    var verb: String
+    var subject: String
+}
+
+enum ToolRowSummary: Hashable, Sendable {
+    case text(String)
+    case lineDelta(added: Int, removed: Int)
 }
 
 struct CodePreviewSummary: Hashable {

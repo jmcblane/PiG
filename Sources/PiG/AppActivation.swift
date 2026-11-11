@@ -24,7 +24,7 @@ final class PiGAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
             let name = title.isEmpty || title == "Untitled" ? controller.projectName : title
             alert.messageText = "Quit PiG while “\(name)” is working?"
         } else {
-            alert.messageText = "Quit PiG while \(working.count) sessions are working?"
+            alert.messageText = "Quit PiG while \(working.count) chats are working?"
         }
         alert.informativeText = "Running agent work and background jobs will be stopped."
         alert.addButton(withTitle: "Quit")

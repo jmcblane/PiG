@@ -71,7 +71,7 @@ extension AppModel {
         }
         if changed {
             do { try AgentSessionStore.save(agentSessionRecords) }
-            catch { statusLine = "Could not save agent session records: \(error.localizedDescription)" }
+            catch { statusLine = "Could not save agent chat records: \(error.localizedDescription)" }
         }
     }
 

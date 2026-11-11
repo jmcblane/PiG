@@ -14,6 +14,7 @@ struct ComposerToolbar: View {
                 .help("Model (⌘1–⌘5)")
             ThinkingDial(controller: controller)
             Spacer(minLength: 8)
+            ContextRingButton(controller: controller)
             if let usageProvider {
                 Group {
                     if usageProvider == .claudeBridge {
@@ -22,7 +23,7 @@ struct ComposerToolbar: View {
                             pendingText: "Waiting for Claude Code quota data…"
                         ) { }
                     } else {
-                        UsageLimitIndicator(snapshot: model.usageLimit(for: usageProvider)) { model.refreshUsageLimit(for: usageProvider) }
+                        StoredUsageLimitIndicator(store: model.usageLimitStore, provider: usageProvider) { model.refreshUsageLimit(for: usageProvider) }
                     }
                 }
                 .frame(width: 84)
@@ -47,6 +48,16 @@ struct ComposerToolbar: View {
         if controller.models.isEmpty { return "Loading…" }
         guard let selectedModel else { return controller.selectedModelID.nonEmptyTrimmed ?? "Select model" }
         return selectedModel.name.isEmpty ? selectedModel.modelId : selectedModel.name
+    }
+}
+
+private struct StoredUsageLimitIndicator: View {
+    @ObservedObject var store: UsageLimitStore
+    let provider: UsageLimitProvider
+    let refresh: () -> Void
+
+    var body: some View {
+        UsageLimitIndicator(snapshot: store.limits[provider], refresh: refresh)
     }
 }
 
@@ -173,6 +184,7 @@ struct ModelPickerMenu: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(appTheme.muted)
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, 10)
@@ -299,6 +311,7 @@ private struct ModelPickerRow: View {
             .buttonStyle(.plain)
             .onHover { hoveringStar = $0 }
             .help(isPinned ? "Unpin" : "Pin to top")
+            .accessibilityLabel(isPinned ? "Unpin" : "Pin to top")
         }
         .contextMenu {
             Button(isPinned ? "Unpin" : "Pin to Top", action: togglePin)

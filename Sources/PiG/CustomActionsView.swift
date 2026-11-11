@@ -24,7 +24,8 @@ struct TitlebarTerminalButton: View {
             Image(systemName: "terminal")
         }
         .buttonStyle(TitlebarIconButtonStyle())
-        .help("Toggle terminal — right-click for terminal actions")
+        .help("Toggle terminal — right-click for splits and tabs")
+        .accessibilityLabel("Toggle terminal")
         .contextMenu {
             Button("Show Fullscreen Terminal") {
                 NotificationCenter.default.post(name: .pigShowTerminal, object: nil)
@@ -102,6 +103,7 @@ struct CustomActionsToolbarButton: View {
             }
             .buttonStyle(.plain)
             .disabled(model.selectedController == nil)
+            .accessibilityLabel("Custom actions")
             .popover(isPresented: $menuOpen, arrowEdge: .bottom) {
                 actionsMenu
             }
@@ -186,6 +188,7 @@ private struct CustomActionMenuRow: View {
             .buttonStyle(.plain)
             .onHover { hoveringPencil = $0 }
             .help("Edit")
+            .accessibilityLabel("Edit")
         }
     }
 }

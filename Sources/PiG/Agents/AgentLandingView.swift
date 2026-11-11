@@ -5,6 +5,7 @@ struct AgentLandingView: View {
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
     let agent: Agent
+    @ObservedObject var landingDraft: LandingDraft
     @State private var projectMenuOpen = false
 
     var body: some View {
@@ -18,7 +19,7 @@ struct AgentLandingView: View {
                     if agent.backend == .pi {
                         let sessions = model.recentSessions(forAgentID: agent.id)
                         if sessions.isEmpty {
-                            EmptyState(text: "No recent sessions", icon: "clock")
+                            EmptyState(text: "No recent chats", icon: "clock")
                                 .frame(maxWidth: .infinity, minHeight: 110)
                         }
                         ForEach(sessions) { session in SessionRow(summary: session) }
@@ -81,13 +82,13 @@ struct AgentLandingView: View {
             .layoutPriority(1)
             if agent.backend == .pi, let controller = model.landingDraftController {
                 ComposerView(controller: controller,
-                             draft: $model.landingDraftText,
-                             imageAttachments: $model.landingDraftImages,
+                             draft: $landingDraft.text,
+                             imageAttachments: $landingDraft.images,
                              beforeSubmit: { model.activateLandingDraft(controller) },
                              focusOnAppear: true)
                     .layoutPriority(1)
             } else if let controller = model.hermesLandingDraftController {
-                HermesComposerView(controller: controller, draft: $model.landingDraftText,
+                HermesComposerView(controller: controller, draft: $landingDraft.text,
                                    beforeSubmit: { model.activateHermesLandingDraft(controller) })
                     .layoutPriority(1)
             }

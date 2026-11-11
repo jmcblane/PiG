@@ -1,8 +1,8 @@
 # PiG
 
 <p>
-  <img src="images/pig-main-window.png" alt="PiG project home and recent sessions" width="49%">
-  <img src="images/pig-chat-session.png" alt="PiG chat session with tool activity" width="49%">
+  <img src="images/pig-main-window.png" alt="PiG project home and recent chats" width="49%">
+  <img src="images/pig-chat-session.png" alt="PiG chat with tool activity" width="49%">
 </p>
 <p>
   <img src="images/pig-split-terminal.png" alt="PiG chat with split terminal" width="49%">
@@ -18,18 +18,18 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 
 ## Features
 
-### Projects & sessions
+### Projects & chats
 
 - Open chats in a list on the left with a pixel folder per project (or the agent's face), title, and status; swipe to mark done, drag to reorder, ⌘S to hide
 - Collapse the open-chats list to an icon rail for more room
-- ⌘K palette for open chats, all sessions (including the archive), agents, projects, files, models, and actions; use ↑/↓ or Ctrl-P/Ctrl-N to move through results
+- ⌘K palette for open chats, all chats, agents, projects, files, models, and actions; use ↑/↓ or Ctrl-P/Ctrl-N to move through results
 - Project files in a popover from the top bar
-- Project home page listing recent sessions
+- Project home page listing recent chats
 - Quick Chats: throwaway chats that don't belong to a project
-- Session names generated automatically (by the session's model, a model you pick, or Apple Intelligence on the Mac); “Rename with AI” generates a new title from the opening conversation turns
-- Session tree view: jump to any earlier point in a conversation and fork a new session from a prompt
-- Search across all sessions, including archived ones (⌘F)
-- Several sessions can run at once; idle ones can be unloaded or reloaded
+- Chat names generated automatically (by the chat's model, a model you pick, or Apple Intelligence on the Mac); “Rename with AI” generates a new title from the opening chat turns
+- Chat Tree view: jump to any earlier point in a chat and fork a new chat from a prompt
+- Search all chats (⇧⌘F)
+- Several chats can run at once; idle ones can be unloaded or reloaded
 - macOS notification when a reply finishes while you're in another app
 
 ### Agents & Hermes
@@ -50,7 +50,7 @@ PiG is a SwiftUI macOS GUI for the `pi` coding agent.
 - `@` completion for files and skills, and slash-command suggestions
 - Queue steering and follow-up messages while the agent works (Option-Up returns queued messages to the composer)
 - Context use shown as a ring around the send button; thinking level as rising bars you click to step
-- Session statistics popover for token usage, context, messages, and tool calls in pi chats
+- Chat Statistics popover for token usage, context, messages, and tool calls in pi chats
 - Claude subscription usage for `claude-bridge`, updated when Claude Code reports quota data (no separate Pi OAuth login required)
 
 ### Inline HTML controls
@@ -69,9 +69,9 @@ the chat.
 
 ### Models
 
-- Model and thinking-level pickers for each session
+- Model and thinking-level pickers for each chat
 - Quick Model shortcuts (⌘1–⌘5)
-- Default model and thinking level for new sessions
+- Default model and thinking level for new chats
 - A schedule that picks the default model by time of day and work days
 - Usage-limit meters for ChatGPT/Codex, Claude and Grok, shown only when you have credentials for that provider
 
@@ -85,7 +85,7 @@ the chat.
 
 - File tree: create, rename and trash files; reveal in Finder; open in Terminal; copy paths and references
 - Custom actions: a button in the title bar that runs your saved shell commands for the project, with output shown in the chat
-- Built-in terminal ([SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)): [fullscreen](images/pig-fullscreen-terminal.png) (⌘⇧F), vertical split (⌘D) or horizontal split (⌘⇧D), with tabs; opens in the session's project folder
+- Built-in terminal ([SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)): [fullscreen](images/pig-fullscreen-terminal.png) (⌥⌘F), vertical split (⌘D) or horizontal split (⇧⌘D), with tabs; opens in the chat's project folder
 
 ### Appearance
 

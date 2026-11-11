@@ -260,7 +260,7 @@ struct AgentEditorView: View {
         GlowSection("Workspace") {
             GlowRow("Folder") {
                 HStack(spacing: 8) {
-                    Text(agent.projectPath?.abbreviatingHomeDirectory() ?? "Quick Chats (saved sessions)")
+                    Text(agent.projectPath?.abbreviatingHomeDirectory() ?? "Quick Chats (saved chats)")
                         .font(AppFonts.ui(12.5))
                         .foregroundStyle(agent.projectPath == nil ? appTheme.muted : appTheme.text)
                         .lineLimit(1)
@@ -345,7 +345,7 @@ struct AgentEditorView: View {
 
     private var extensionsSection: some View {
         GlowSection("Extensions", footer: agent.extensions == nil
-                    ? "Loads the same extensions as your other pi sessions."
+                    ? "Loads the same extensions as your other pi chats."
                     : "Launches with --no-extensions and loads only the checked extensions.") {
             GlowRow("Extensions") {
                 GlowSegmented(

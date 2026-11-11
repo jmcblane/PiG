@@ -20,6 +20,7 @@ enum SessionScanner {
     private static let cacheLock = NSLock()
     private static let cacheWriteLock = NSLock()
     nonisolated(unsafe) private static var cacheLoaded = false
+    nonisolated(unsafe) private static var cacheDirty = false
     nonisolated(unsafe) private static var summaryCache: [String: CachedSummary] = [:]
 
     static func cachedSummaries(forPaths paths: [String]) async -> [String: [SessionSummary]] {
@@ -71,7 +72,11 @@ enum SessionScanner {
             grouped[summary.projectPath, default: []].append(summary)
         }
         cacheLock.lock()
-        summaryCache = summaryCache.filter { existingPaths.contains($0.key) }
+        let retained = summaryCache.filter { existingPaths.contains($0.key) }
+        if retained.count != summaryCache.count {
+            summaryCache = retained
+            cacheDirty = true
+        }
         cacheLock.unlock()
         sort(&grouped)
         persistCache()
@@ -88,7 +93,10 @@ enum SessionScanner {
 
         guard let summary = SessionParser.parseSummaryFile(url) else { return nil }
         cacheLock.lock()
-        summaryCache[url.path] = CachedSummary(key: key, summary: summary)
+        if summaryCache[url.path]?.key != key {
+            summaryCache[url.path] = CachedSummary(key: key, summary: summary)
+            cacheDirty = true
+        }
         cacheLock.unlock()
         return summary
     }
@@ -108,12 +116,23 @@ enum SessionScanner {
         cacheWriteLock.lock()
         defer { cacheWriteLock.unlock() }
         cacheLock.lock()
+        guard cacheDirty else {
+            cacheLock.unlock()
+            return
+        }
         let snapshot = summaryCache
+        cacheDirty = false
         cacheLock.unlock()
         let payload = CachePayload(version: cacheVersion, summaries: snapshot)
-        guard let data = try? JSONEncoder().encode(payload) else { return }
-        try? FileManager.default.createDirectory(at: PiPaths.appSupport, withIntermediateDirectories: true)
-        try? data.write(to: PiPaths.sessionSummaryCacheFile, options: [.atomic])
+        do {
+            let data = try JSONEncoder().encode(payload)
+            try FileManager.default.createDirectory(at: PiPaths.appSupport, withIntermediateDirectories: true)
+            try data.write(to: PiPaths.sessionSummaryCacheFile, options: [.atomic])
+        } catch {
+            cacheLock.lock()
+            cacheDirty = true
+            cacheLock.unlock()
+        }
     }
 
     private static func sort(_ grouped: inout [String: [SessionSummary]]) {

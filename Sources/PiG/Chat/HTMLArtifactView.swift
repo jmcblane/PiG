@@ -123,6 +123,7 @@ struct HTMLArtifactView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .help("Interactive controls options")
+            .accessibilityLabel("Interactive controls options")
             .opacity(hovering ? 1 : 0)
             .allowsHitTesting(hovering)
         }

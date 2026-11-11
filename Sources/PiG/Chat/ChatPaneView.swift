@@ -45,6 +45,7 @@ struct ChatPaneView: View {
                         draft: draftBinding(forKey: draftKey),
                         imageAttachments: imageDraftBinding(forKey: draftKey)
                     )
+                        .environment(\.chatFindEnabled, workspace.mode != .full)
                         .frame(width: chat.width, height: chat.height, alignment: .topLeading)
                         .offset(x: chat.minX, y: chat.minY)
                         .opacity(workspace.mode == .full ? 0 : 1)

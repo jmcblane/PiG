@@ -96,10 +96,7 @@ struct ComposerView: View {
                     )
                     .frame(maxWidth: .infinity)
                     .frame(height: max(entryHeight, AppFonts.scaled(15.5) + 20))
-                    ContextRingSendButton(
-                        percent: controller.contextPercent,
-                        tokens: controller.contextTokens,
-                        window: controller.contextWindow,
+                    ComposerSendButton(
                         aborting: controller.canAbort,
                         disabled: isSubmitting || controller.isSendingPrompt || (!controller.canAbort && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && imageAttachments.isEmpty)
                     ) {
@@ -377,6 +374,7 @@ private struct ComposerImageAttachmentsView: View {
                         }
                         .buttonStyle(.plain)
                         .help("Remove \(attachment.name)")
+                        .accessibilityLabel("Remove \(attachment.name)")
                     }
                     .padding(5)
                     .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(appTheme.codeBackground.opacity(0.45)))
@@ -481,6 +479,7 @@ private struct QueuedMessagesView: View {
             .buttonStyle(.plain)
             .foregroundStyle(appTheme.brass)
             .help("Return queued messages to the composer (Option-Up)")
+            .accessibilityLabel("Return queued messages to the composer")
         }
         .font(AppFonts.ui(11.5))
         .foregroundStyle(appTheme.secondaryText)

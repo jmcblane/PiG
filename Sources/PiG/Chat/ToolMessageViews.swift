@@ -12,12 +12,13 @@ enum ToolActivityState: Hashable {
 struct ToolActivityIndicator: View {
     @Environment(\.appTheme) private var appTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var occlusion = AppOcclusion.shared
     let state: ToolActivityState
 
     var body: some View {
         ZStack {
             if state == .working && !reduceMotion {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !occlusion.isVisible)) { context in
                     let phase = context.date.timeIntervalSinceReferenceDate
                         .truncatingRemainder(dividingBy: 1.2) / 1.2
                     Circle()
@@ -36,7 +37,9 @@ struct ToolActivityIndicator: View {
                     .fill(color)
                     .frame(width: 7, height: 7)
             case .done:
-                EmptyView()
+                Circle()
+                    .fill(color)
+                    .frame(width: 7, height: 7)
             case .error:
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(AppFonts.ui(12, weight: .semibold))
@@ -80,7 +83,6 @@ struct ToolActivityView: View {
     var htmlArtifacts: [String: HTMLArtifact] = [:]
     var htmlActionTarget: SessionController? = nil
     @State private var expanded = false
-    @State private var observedActiveTurn = false
     @State private var hoveringSummary = false
 
     private var failedCount: Int {
@@ -97,29 +99,22 @@ struct ToolActivityView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if group.isActive || expanded {
-                if !group.isActive {
-                    disclosureButton
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 12)
-                }
+            disclosureButton
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+            if expanded {
                 orderedContent
-                    .padding(.leading, group.isActive ? 0 : 12)
+                    .padding(.leading, 12)
                     .overlay(alignment: .leading) {
-                        if !group.isActive {
-                            Rectangle()
-                                .fill(appTheme.muted.opacity(0.25))
-                                .frame(width: 1)
-                                .padding(.leading, 18)
-                                .allowsHitTesting(false)
-                                .accessibilityHidden(true)
-                        }
+                        Rectangle()
+                            .fill(appTheme.muted.opacity(0.25))
+                            .frame(width: 1)
+                            .padding(.leading, 18)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                     .transition(.opacity)
             } else {
-                disclosureButton
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 12)
                 // Running background jobs stay in view as one line each while the turn is folded.
                 let runningJobs = group.tools.filter { $0.backgroundJob != nil && $0.status == .running }
                 if !runningJobs.isEmpty {
@@ -136,13 +131,6 @@ struct ToolActivityView: View {
                         }
                 }
             }
-        }
-        .onAppear { observedActiveTurn = group.isActive }
-        .onChange(of: group.isActive) { wasActive, isActive in
-            if wasActive && !isActive && observedActiveTurn {
-                withAnimation(.easeInOut(duration: 0.12)) { expanded = false }
-            }
-            observedActiveTurn = observedActiveTurn || isActive
         }
     }
 
@@ -178,11 +166,6 @@ struct ToolActivityView: View {
                         .frame(height: 0)
                 }
             }
-            if group.isActive {
-                InlineActivityIndicator(text: activityText)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 16)
-            }
         }
     }
 
@@ -196,15 +179,23 @@ struct ToolActivityView: View {
                     .foregroundStyle(hoveringSummary ? appTheme.secondaryText : appTheme.muted)
                     .frame(width: 18, height: 18)
 
-                Text("Tool activity")
-                    .font(AppFonts.ui(13, weight: .medium))
-                    .foregroundStyle(appTheme.secondaryText)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(activitySentence)
+                        .font(AppFonts.ui(13, weight: .medium))
+                        .foregroundStyle(appTheme.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
-                Text("\(group.tools.count)")
-                    .font(AppFonts.code(11, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(appTheme.muted)
+                    if failedCount > 0 {
+                        Text("· \(failedCount) failed")
+                            .font(AppFonts.ui(13, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(appTheme.danger)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                }
+                .layoutPriority(1)
 
                 Rectangle()
                     .fill(summaryIsHighlighted ? appTheme.brass : appTheme.muted.opacity(hoveringSummary ? 0.4 : 0.25))
@@ -213,22 +204,13 @@ struct ToolActivityView: View {
                     .padding(.horizontal, 7)
                     .accessibilityHidden(true)
 
-                if failedCount > 0 || unfinishedCount > 0 {
+                if unfinishedCount > 0 {
                     ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) {
-                            if failedCount > 0 {
-                                Label("\(failedCount) failed", systemImage: "exclamationmark.circle.fill")
-                                    .foregroundStyle(appTheme.danger)
-                            }
-                            if unfinishedCount > 0 {
-                                Label("\(unfinishedCount) unfinished", systemImage: "circle.dashed")
-                                    .foregroundStyle(appTheme.toolRunning)
-                            }
-                        }
-                        Image(systemName: failedCount > 0 ? "exclamationmark.circle.fill" : "circle.dashed")
-                            .foregroundStyle(summaryColor)
+                        Label("\(unfinishedCount) unfinished", systemImage: "circle.dashed")
+                        Image(systemName: "circle.dashed")
                     }
                     .font(AppFonts.ui(11.5, weight: .medium))
+                    .foregroundStyle(appTheme.toolRunning)
                 }
 
                 Image(systemName: "chevron.down")
@@ -247,7 +229,7 @@ struct ToolActivityView: View {
         .accessibilityLabel(summary)
         .accessibilityValue(expanded ? "Expanded" : "Collapsed")
         .background {
-            if !expanded && !group.isActive {
+            if !expanded {
                 ZStack {
                     ForEach(group.messageIDs, id: \.self) { messageID in
                         ChatMessageScrollAnchor(messageID: messageID)
@@ -259,15 +241,58 @@ struct ToolActivityView: View {
     }
 
     private var summary: String {
-        let count = group.tools.count
-        var parts = ["\(count) tool\(count == 1 ? "" : "s")"]
+        var parts = [activitySentence]
         if failedCount > 0 { parts.append("\(failedCount) failed") }
         if unfinishedCount > 0 { parts.append("\(unfinishedCount) unfinished") }
-        return parts.joined(separator: " · ")
+        return parts.joined(separator: ", ")
     }
 
-    private var summaryColor: Color {
-        failedCount > 0 ? appTheme.danger : appTheme.toolRunning
+    private var activitySentence: String {
+        var order: [ToolActivityKind] = []
+        var counts: [ToolActivityKind: Int] = [:]
+        for tool in group.tools {
+            let kind = ToolActivityKind(tool.shortName)
+            if counts[kind] == nil { order.append(kind) }
+            counts[kind, default: 0] += 1
+        }
+        let phrases = order.map { $0.phrase(count: counts[$0, default: 0], isOnlyKind: order.count == 1) }
+        guard let first = phrases.first else { return "No tools" }
+        return ([first.prefix(1).uppercased() + first.dropFirst()] + phrases.dropFirst()).joined(separator: ", ")
+    }
+}
+
+private enum ToolActivityKind: Hashable {
+    case read, write, edit, command, search, subagent, script, background, other
+
+    init(_ shortName: String) {
+        switch shortName {
+        case "read": self = .read
+        case "write": self = .write
+        case "edit": self = .edit
+        case "bash": self = .command
+        case "grep", "find", "ls", "search", "web_search", "websearch": self = .search
+        case "subagent", "delegate_agent": self = .subagent
+        case "codemode": self = .script
+        case "background": self = .background
+        default: self = .other
+        }
+    }
+
+    func phrase(count: Int, isOnlyKind: Bool) -> String {
+        func counted(_ noun: String, _ plural: String? = nil) -> String {
+            "\(count) \(count == 1 ? noun : plural ?? noun + "s")"
+        }
+        switch self {
+        case .read: return "read \(counted("file"))"
+        case .write: return "wrote \(counted("file"))"
+        case .edit: return "edited \(counted("file"))"
+        case .command: return "ran \(counted("command"))"
+        case .search: return count == 1 ? "searched" : "searched \(count) times"
+        case .subagent: return count == 1 ? "delegated to subagents" : "delegated to subagents \(count) times"
+        case .script: return "ran \(counted("script"))"
+        case .background: return "started \(counted("background job"))"
+        case .other: return "used \(count) \(isOnlyKind ? "" : "other ")tool\(count == 1 ? "" : "s")"
+        }
     }
 }
 
@@ -410,126 +435,72 @@ struct ToolGroupView: View {
     }
 }
 
-private enum ToolExpansion: String, Sendable {
-    case collapsed, partial, full
-
-    var next: Self {
-        switch self {
-        case .partial: return .full
-        case .full: return .collapsed
-        case .collapsed: return .partial
-        }
-    }
-
-    var actionLabel: String {
-        switch self {
-        case .partial: return "Show all output"
-        case .full: return "Hide tool details"
-        case .collapsed: return "Show last 10 lines"
-        }
-    }
-}
-
 private struct PreparedToolRow: @unchecked Sendable {
-    var title: String
+    var summary: ToolRowSummary?
     var imagePath: String?
     var writePreview: CodePreviewSummary?
     var editDiff: EditDiffSummary?
     var bashPreview: CodePreviewSummary?
+    var bashLineCount = 0
 
-    init(tool: ToolDisplay, projectPath: String?, expansion: ToolExpansion) {
-        title = tool.displayTitle
-        guard expansion != .collapsed else {
-            imagePath = nil
-            writePreview = nil
-            editDiff = nil
-            bashPreview = nil
-            return
-        }
+    init(tool: ToolDisplay, projectPath: String?, expanded: Bool, showsAllOutput: Bool) {
+        summary = tool.rowSummary
+        guard expanded else { return }
         imagePath = tool.readImagePath(projectPath: projectPath)
         writePreview = tool.writePreview()
         editDiff = tool.editDiff(projectPath: projectPath)
-        bashPreview = tool.bashOutputPreview(maxLines: expansion == .partial ? 10 : nil)
+        bashPreview = tool.bashOutputPreview(maxLines: showsAllOutput ? nil : ToolRow.bashTailLines)
+        bashLineCount = bashPreview.map { $0.lines.count + $0.hiddenLineCount } ?? 0
     }
 }
 
 struct ToolRow: View {
+    static let bashTailLines = 10
     @Environment(\.appTheme) private var appTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var occlusion = AppOcclusion.shared
+    @Environment(\.revealMessage) private var revealMessage
     let tool: ToolDisplay
     let projectPath: String?
-    @Environment(\.revealMessage) private var revealMessage
-    @State private var expansion: ToolExpansion = .collapsed
+    @State private var expanded: Bool
+    @State private var userToggled = false
+    @State private var showsAllOutput = false
     @State private var prepared: PreparedToolRow?
-
-    /// User commands and background shell jobs step through the last 10 lines before all output.
-    private var cyclesExpansion: Bool {
-        tool.userLabel != nil || (tool.backgroundJob != nil && tool.shortName == "bash")
-    }
-
-    private var expanded: Bool { expansion != .collapsed }
-    @State private var showingCommand = false
-    @State private var hovering = false
 
     init(tool: ToolDisplay, projectPath: String?, startsExpanded: Bool = false) {
         self.tool = tool
         self.projectPath = projectPath
-        let cycles = tool.userLabel != nil || (tool.backgroundJob != nil && tool.shortName == "bash")
-        // Background jobs keep to one line until opened.
-        let initial: ToolExpansion = startsExpanded ? (cycles ? .partial : .full)
-            : tool.backgroundJob != nil ? .collapsed
-            : tool.userLabel != nil ? .partial
-            : Self.isSubagent(tool) && tool.status == .running ? .full : .collapsed
-        _expansion = State(initialValue: initial)
+        _expanded = State(initialValue: startsExpanded || (tool.backgroundJob == nil
+            && (tool.userLabel != nil || (Self.isSubagent(tool) && tool.status == .running))))
     }
 
     var body: some View {
+        let title = bashActionLabel.map { ToolRowTitle(verb: $0, subject: "") } ?? tool.rowTitle(projectPath: projectPath)
+        let isExpandable = tool.hasExpandableDetails
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                Button {
-                    if let target = tool.backgroundJob?.resultMessageID {
-                        revealMessage?(target)
-                        return
+            HStack(alignment: .top, spacing: 4) {
+                if isExpandable {
+                    Button {
+                        userToggled = true
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.12)) { expanded.toggle() }
+                    } label: {
+                        header(title, isExpandable: true)
                     }
-                    guard tool.hasExpandableDetails else { return }
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.12)) {
-                        expansion = cyclesExpansion ? expansion.next : (expanded ? .collapsed : .full)
-                    }
-                } label: {
-                    HStack(spacing: 7) {
-                        if let job = tool.backgroundJob, job.id > 0 {
-                            Text("job \(job.id)")
-                                .font(AppFonts.code(12, weight: .bold))
-                                .foregroundStyle(appTheme.secondaryText)
-                                .lineLimit(1)
-                        }
-                        if let label = customActionLabel {
-                            Text(label)
-                                .font(AppFonts.code(12, weight: .bold))
-                                .foregroundStyle(appTheme.secondaryText)
-                                .lineLimit(1)
-                        }
-                        toolTitle
-                    }
-                    .frame(minHeight: 22, alignment: .leading)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .help(helpText(title))
+                    .accessibilityLabel(accessibilityTitle(title))
+                    .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                    .accessibilityHint(expanded ? "Hides tool details" : "Shows tool details")
+                } else {
+                    header(title, isExpandable: false)
+                        .help(helpText(title))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(accessibilityTitle(title))
                 }
-                .buttonStyle(.plain)
-                .help(tool.backgroundJob?.resultMessageID != nil ? "Show result" : tool.hasExpandableDetails ? (cyclesExpansion ? expansion.actionLabel : (expanded ? "Hide tool details" : "Show tool details")) : (prepared?.title ?? tool.shortName.capitalized))
-                .accessibilityValue(expansion == .partial ? "Last 10 lines" : (expanded ? "Expanded" : "Collapsed"))
-                .frame(minWidth: 0)
-
-                if let command = tool.bashCommand {
-                    bashCommandButton(command)
-                        .opacity(hovering || showingCommand ? 1 : 0)
-                        .allowsHitTesting(hovering || showingCommand)
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: hovering)
-                }
-
-                Spacer(minLength: 0)
 
                 if let job = tool.backgroundJob {
                     BackgroundJobTime(job: job, isRunning: tool.status == .running)
+                        .frame(minHeight: 22)
                     if let target = job.resultMessageID {
                         Button { revealMessage?(target) } label: {
                             Image(systemName: "arrow.down")
@@ -544,54 +515,163 @@ struct ToolRow: View {
                     }
                 }
             }
-            .onHover { hovering = $0 }
 
-            if expanded {
-                if let imagePath = prepared?.imagePath {
-                    ImagePreviewView(path: imagePath)
-                        .padding(.leading, 12)
-                }
-
-                if !tool.images.isEmpty {
-                    MessageImagesView(images: tool.images)
-                        .padding(.leading, 12)
-                }
-
-                if let preview = prepared?.writePreview {
-                    CodePreviewView(preview: preview)
-                        .padding(.leading, 12)
-                }
-
-                if let diff = prepared?.editDiff {
-                    EditDiffView(diff: diff)
-                        .padding(.leading, 12)
-                }
-
-                if let preview = prepared?.bashPreview {
-                    CodePreviewView(preview: preview)
-                        .padding(.leading, 12)
-                }
-
-                if showsRawDetails {
-                    ToolDetailsView(tool: tool)
-                        .padding(.leading, 12)
-                        .transition(.opacity)
-                }
+            if expanded && isExpandable {
+                details
+                    .padding(.leading, 23)
+                    .transition(.opacity)
             }
         }
         .task(id: preparationTaskID) {
             let tool = tool
             let projectPath = projectPath
-            let expansion = expansion
+            let expanded = expanded
+            let showsAllOutput = showsAllOutput
             let value = await Task.detached(priority: .utility) {
-                PreparedToolRow(tool: tool, projectPath: projectPath, expansion: expansion)
+                PreparedToolRow(tool: tool, projectPath: projectPath, expanded: expanded, showsAllOutput: showsAllOutput)
             }.value
             guard !Task.isCancelled else { return }
             prepared = value
         }
         .onChange(of: tool.status) { _, status in
-            if status == .running, Self.isSubagent(tool), tool.backgroundJob == nil {
-                expansion = .full
+            if status == .running, Self.isSubagent(tool), tool.backgroundJob == nil, !userToggled {
+                expanded = true
+            }
+        }
+    }
+
+    private func header(_ title: ToolRowTitle, isExpandable: Bool) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: tool.rowSymbolName)
+                .font(AppFonts.ui(11, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 16, height: 22)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 7) {
+                    if let job = tool.backgroundJob, job.id > 0 {
+                        Text("job \(job.id)")
+                            .font(AppFonts.code(12, weight: .bold))
+                            .foregroundStyle(appTheme.secondaryText)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    if bashActionLabel == nil, let label = customActionLabel {
+                        Text(label)
+                            .font(AppFonts.code(12, weight: .bold))
+                            .foregroundStyle(appTheme.secondaryText)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    pulsingTitle(title)
+                    Spacer(minLength: 8)
+                    summaryView
+                    if isExpandable {
+                        Image(systemName: "chevron.right")
+                            .font(AppFonts.ui(9, weight: .bold))
+                            .foregroundStyle(appTheme.muted)
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                            .frame(width: 12)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .frame(minHeight: 22)
+
+                if let errorLine = tool.errorLine {
+                    Text(errorLine)
+                        .font(AppFonts.ui(11.5))
+                        .foregroundStyle(appTheme.danger)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.bottom, 3)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func pulsingTitle(_ title: ToolRowTitle) -> some View {
+        if tool.status == .running && !reduceMotion {
+            TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: !occlusion.isVisible)) { context in
+                let phase = context.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: 1.6) / 1.6
+                let opacity = 0.72 + 0.28 * (0.5 + 0.5 * sin(phase * 2 * .pi))
+                titleText(title).opacity(opacity)
+            }
+        } else {
+            titleText(title)
+        }
+    }
+
+    private func titleText(_ title: ToolRowTitle) -> some View {
+        HStack(spacing: 6) {
+            Text(title.verb)
+                .font(AppFonts.ui(12.5, weight: .medium))
+                .foregroundStyle(titleColor)
+                .lineLimit(1)
+                .layoutPriority(1)
+            if !title.subject.isEmpty {
+                Text(title.subject)
+                    .font(AppFonts.code(12))
+                    .foregroundStyle(tool.status == .running ? appTheme.toolRunning.opacity(0.8) : appTheme.muted)
+                    .lineLimit(1)
+                    .truncationMode(subjectIsPath ? .middle : .tail)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var summaryView: some View {
+        Group {
+            switch prepared?.summary {
+            case .text(let text)?:
+                Text(text)
+            case .lineDelta(let added, let removed)?:
+                Text("+\(added)").foregroundStyle(appTheme.good) + Text(" -\(removed)").foregroundStyle(appTheme.danger)
+            case nil:
+                EmptyView()
+            }
+        }
+        .font(AppFonts.ui(11.5))
+        .monospacedDigit()
+        .foregroundStyle(appTheme.muted)
+        .lineLimit(1)
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let imagePath = prepared?.imagePath {
+                ImagePreviewView(path: imagePath)
+            }
+
+            if !tool.images.isEmpty {
+                MessageImagesView(images: tool.images)
+            }
+
+            if let preview = prepared?.writePreview {
+                CodePreviewView(preview: preview)
+            }
+
+            if let diff = prepared?.editDiff {
+                EditDiffView(diff: diff)
+            }
+
+            if tool.shortName == "bash", tool.bashCommand != nil || prepared?.bashPreview != nil {
+                BashOutputView(
+                    command: tool.bashCommand,
+                    preview: prepared?.bashPreview,
+                    lineCount: prepared?.bashLineCount ?? 0,
+                    showsAll: $showsAllOutput
+                )
+            }
+
+            if showsRawDetails {
+                ToolDetailsView(tool: tool, projectPath: projectPath)
             }
         }
     }
@@ -600,10 +680,18 @@ struct ToolRow: View {
         tool.shortName == "subagent" || tool.shortName == "delegate_agent"
     }
 
+    private var subjectIsPath: Bool {
+        ["read", "write", "edit", "ls"].contains(tool.shortName)
+    }
+
     private var customActionLabel: String? {
         guard let label = tool.userLabel?.nonEmptyTrimmed else { return nil }
         if label == "you" || label == "you · hidden" { return nil }
         return label.hasPrefix("you · ") ? String(label.dropFirst(6)) : label
+    }
+
+    private var bashActionLabel: String? {
+        tool.bashCommand == nil ? nil : customActionLabel
     }
 
     private var showsRawDetails: Bool {
@@ -615,28 +703,35 @@ struct ToolRow: View {
     }
 
     private var preparationTaskID: String {
-        "\(tool.id)|\(tool.status.rawValue)|\(tool.arguments.count)|\(tool.result.count)|\(tool.details?.count ?? 0)|\(expansion.rawValue)|\(projectPath ?? "")"
+        "\(tool.id)|\(tool.status.rawValue)|\(tool.arguments.count)|\(tool.result.count)|\(tool.details?.count ?? 0)|\(expanded)|\(showsAllOutput)|\(projectPath ?? "")"
     }
 
-    @ViewBuilder
-    private var toolTitle: some View {
-        if tool.status == .running && !reduceMotion {
-            TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { context in
-                let phase = context.date.timeIntervalSinceReferenceDate
-                    .truncatingRemainder(dividingBy: 1.6) / 1.6
-                let opacity = 0.72 + 0.28 * (0.5 + 0.5 * sin(phase * 2 * .pi))
-                titleText.opacity(opacity)
-            }
-        } else {
-            titleText
+    private func helpText(_ title: ToolRowTitle) -> String {
+        title.subject.isEmpty ? title.verb : "\(title.verb) \(title.subject)"
+    }
+
+    private func accessibilityTitle(_ title: ToolRowTitle) -> String {
+        var parts = [helpText(title)]
+        switch tool.status {
+        case .failed: parts.append("failed")
+        case .running: parts.append("running")
+        case .pending: parts.append("pending")
+        case .succeeded: break
         }
+        if case .text(let text)? = prepared?.summary { parts.append(text) }
+        if case .lineDelta(let added, let removed)? = prepared?.summary {
+            parts.append("\(added) lines added, \(removed) removed")
+        }
+        if let errorLine = tool.errorLine { parts.append(errorLine) }
+        return parts.joined(separator: ", ")
     }
 
-    private var titleText: some View {
-        Text(tool.displayTitle)
-            .font(AppFonts.code(12, weight: .regular))
-            .foregroundStyle(titleColor)
-            .lineLimit(1)
+    private var iconColor: Color {
+        switch tool.status {
+        case .failed: return appTheme.danger
+        case .running: return appTheme.toolRunning
+        case .pending, .succeeded: return appTheme.muted
+        }
     }
 
     private var titleColor: Color {
@@ -647,74 +742,72 @@ struct ToolRow: View {
         case .succeeded: return appTheme.secondaryText
         }
     }
-
-    private func bashCommandButton(_ command: String) -> some View {
-        Button {
-            showingCommand.toggle()
-        } label: {
-            Image(systemName: "terminal")
-                .font(AppFonts.ui(11, weight: .semibold))
-                .foregroundStyle(showingCommand ? appTheme.brass : appTheme.muted)
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Show command")
-        .accessibilityLabel("Show command")
-        .popover(isPresented: $showingCommand, arrowEdge: .bottom) {
-            BashCommandPopover(command: command)
-        }
-    }
 }
 
-struct BashCommandPopover: View {
+private struct BashOutputView: View {
     @Environment(\.appTheme) private var appTheme
-    let command: String
-    @State private var copied = false
+    let command: String?
+    let preview: CodePreviewSummary?
+    let lineCount: Int
+    @Binding var showsAll: Bool
+    @State private var showsFullCommand = false
+
+    private static let commandLineLimit = 6
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Spacer(minLength: 0)
-                Button(action: copyCommand) {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+            if let command {
+                HStack(alignment: .top, spacing: 6) {
+                    (Text("$ ").foregroundStyle(appTheme.muted) + Text(command).foregroundStyle(appTheme.codeText.opacity(0.92)))
+                        .font(AppFonts.code(12.5))
+                        .lineLimit(showsFullCommand ? nil : Self.commandLineLimit)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    CopyButton(label: "Copy command") { command }
                 }
-                .buttonStyle(InlineIconButtonStyle())
-                .help(copied ? "Copied" : "Copy command")
-                .accessibilityLabel("Copy command")
+                if command.split(separator: "\n", omittingEmptySubsequences: false).count > Self.commandLineLimit {
+                    ToolLinkButton(title: showsFullCommand ? "Show less of command" : "Show full command") {
+                        showsFullCommand.toggle()
+                    }
+                }
             }
-            ScrollView {
-                Text(command)
-                    .font(AppFonts.code(12.5))
-                    .foregroundStyle(appTheme.codeText.opacity(0.92))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let preview, hasOutput(preview) {
+                if command != nil {
+                    Rectangle()
+                        .fill(appTheme.line.opacity(0.5))
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
+                }
+                if lineCount > ToolRow.bashTailLines {
+                    ToolLinkButton(title: showsAll ? "Show last \(ToolRow.bashTailLines) lines" : "Show all \(lineCount) lines") {
+                        showsAll.toggle()
+                    }
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(preview.lines) { line in
+                        CodePreviewLineView(line: line)
+                    }
+                }
             }
-            .frame(maxHeight: 280)
         }
-        .padding(12)
-        .frame(width: 420)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .toolBodyStyle()
     }
 
-    private func copyCommand() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(command, forType: .string)
-        copied = true
-        Task {
-            try? await Task.sleep(nanoseconds: 900_000_000)
-            copied = false
-        }
+    private func hasOutput(_ preview: CodePreviewSummary) -> Bool {
+        !(preview.lines.count == 1 && preview.lines[0].text.isEmpty)
     }
 }
 
 struct ToolDetailsView: View {
-    @Environment(\.appTheme) private var appTheme
     let tool: ToolDisplay
+    let projectPath: String?
 
     var body: some View {
         switch tool.shortName {
-        case "bash": BashToolDetailsView(tool: tool)
-        case "subagent", "delegate_agent": SubagentToolDetailsView(tool: tool)
+        case "subagent", "delegate_agent": SubagentToolDetailsView(tool: tool, projectPath: projectPath)
         case "codemode": CodemodeToolDetailsView(tool: tool)
         default: FallbackToolDetailsView(tool: tool)
         }
@@ -749,6 +842,7 @@ struct CodemodeToolDetailsView: View {
                 }
                 .font(AppFonts.code(12))
                 .textSelection(.enabled)
+                .toolBodyStyle()
             }
             if !output.isEmpty {
                 DetailSection(title: "Output", maxHeight: 520) { output }
@@ -761,35 +855,7 @@ struct CodemodeToolDetailsView: View {
     }
 }
 
-struct BashToolDetailsView: View {
-    @Environment(\.appTheme) private var appTheme
-    let tool: ToolDisplay
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            DetailLine(label: "Command", value: stringArg("command") ?? tool.displayTitle)
-            if let timeout = numberArg("timeout") { DetailLine(label: "Timeout", value: "\(timeout)s") }
-            if let exit = exitStatus { DetailLine(label: "Exit status", value: exit) }
-        }
-        .padding(10)
-        .background(appTheme.panel2.opacity(0.36))
-    }
-
-    private var exitStatus: String? {
-        guard let obj = tool.resultObject else { return nil }
-        if let value = obj["exitCode"] ?? obj["exit_status"] ?? obj["status"] { return String(describing: value) }
-        return nil
-    }
-
-    private func stringArg(_ key: String) -> String? { tool.argumentsObject?[key] as? String }
-    private func numberArg(_ key: String) -> String? {
-        guard let value = tool.argumentsObject?[key] else { return nil }
-        return String(describing: value)
-    }
-}
-
 struct FallbackToolDetailsView: View {
-    @Environment(\.appTheme) private var appTheme
     let tool: ToolDisplay
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -807,24 +873,28 @@ struct DetailSection: View {
     let text: () -> String
 
     var body: some View {
+        let value = text()
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text(title).font(AppFonts.ui(11.5, weight: .semibold)).foregroundStyle(appTheme.muted)
                 Spacer()
-                Button { copy(text()) } label: { Image(systemName: "doc.on.doc") }.buttonStyle(InlineIconButtonStyle())
+                CopyButton(label: "Copy \(title.lowercased())") { value }
             }
-            if let maxHeight {
-                ScrollView(.vertical) { codeText }
-                    .frame(height: min(AppFonts.scaled(maxHeight), estimatedHeight(text())))
-                    .background(codeBlockBackground)
-            } else {
-                codeText.background(codeBlockBackground)
+            Group {
+                if let maxHeight {
+                    CappedHeight(maxHeight: AppFonts.scaled(maxHeight)) {
+                        ScrollView(.vertical) { codeText(value) }
+                    }
+                } else {
+                    codeText(value)
+                }
             }
+            .toolBodyStyle(padding: 0)
         }
     }
 
-    private var codeText: some View {
-        Text(text())
+    private func codeText(_ value: String) -> some View {
+        Text(value)
             .font(AppFonts.code(12.5))
             .foregroundStyle(appTheme.codeText.opacity(0.92))
             .lineLimit(nil)
@@ -832,34 +902,5 @@ struct DetailSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
             .padding(9)
-    }
-
-    private var codeBlockBackground: some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
-            .fill(appTheme.codeBackground.opacity(0.24))
-    }
-
-    private func estimatedHeight(_ text: String) -> CGFloat {
-        let visualLines = text.components(separatedBy: "\n").reduce(0) { total, line in
-            total + max(1, Int(ceil(Double(max(line.count, 1)) / 68.0)))
-        }
-        return max(42, AppFonts.scaled(CGFloat(visualLines) * 18.5 + 18))
-    }
-
-    private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
-}
-
-struct DetailLine: View {
-    @Environment(\.appTheme) private var appTheme
-    let label: String
-    let value: String
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(label).font(AppFonts.ui(11.5, weight: .semibold)).foregroundStyle(appTheme.muted).frame(width: 76, alignment: .trailing)
-            Text(value).font(AppFonts.code(12.5)).foregroundStyle(appTheme.secondaryText).textSelection(.enabled)
-        }
     }
 }

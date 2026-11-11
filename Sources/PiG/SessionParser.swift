@@ -362,7 +362,7 @@ enum SessionParser {
                 ?? (entry["customType"] as? String)
                 ?? "Custom entry"
         case .sessionInfo:
-            text = entry["name"] as? String ?? "Session info"
+            text = entry["name"] as? String ?? "Chat info"
         case .unknown:
             text = entry["type"] as? String ?? "Entry"
         }

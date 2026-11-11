@@ -503,6 +503,17 @@ enum MarkdownSelectableTextBuilder {
 // MARK: - Text view
 
 final class MarkdownTextView: NSTextView {
+    var findCurrentRange: NSRange?
+
+    var currentFindRect: NSRect? {
+        guard let range = findCurrentRange, NSMaxRange(range) <= (textStorage?.length ?? 0),
+              let layoutManager, let textContainer else { return nil }
+        layoutManager.ensureLayout(for: textContainer)
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        return layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+            .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+    }
+
     // Explicit TextKit 1 stack: deterministic measurement via
     // layoutManager.usedRect, and per-message documents are small.
     static func make() -> MarkdownTextView {
@@ -622,7 +633,9 @@ final class MarkdownTextView: NSTextView {
 // MARK: - Representable
 
 struct SelectableMarkdownText: NSViewRepresentable {
+    @Environment(\.appTheme) private var appTheme
     let text: MarkdownAttributedText
+    var findHighlights: ChatFindTextHighlights? = nil
     /// Report the laid-out line width instead of the full proposed width,
     /// so a short message can size its container (the user bubble) to fit.
     var hugsWidth = false
@@ -657,6 +670,25 @@ struct SelectableMarkdownText: NSViewRepresentable {
     // O(message) per frame, quadratic over the message's life. Replacing only
     // the tail lets TextKit invalidate just the changed range.
     private func apply(to view: MarkdownTextView, coordinator: Coordinator) {
+        let changed = coordinator.text?.attributed !== text.attributed
+        applyText(to: view, coordinator: coordinator)
+        guard findHighlights != nil || coordinator.findHighlights != nil else { return }
+        let accent = NSColor(appTheme.brass)
+        guard changed || coordinator.findHighlights != findHighlights || coordinator.findAccent != accent else { return }
+        coordinator.findHighlights = findHighlights
+        coordinator.findAccent = accent
+        view.findCurrentRange = findHighlights?.currentRange
+        guard let layoutManager = view.layoutManager, let storage = view.textStorage else { return }
+        layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: NSRange(location: 0, length: storage.length))
+        for range in findHighlights?.ranges ?? [] where NSMaxRange(range) <= storage.length {
+            layoutManager.addTemporaryAttribute(.backgroundColor, value: accent.withAlphaComponent(0.25), forCharacterRange: range)
+        }
+        if let range = findHighlights?.currentRange, NSMaxRange(range) <= storage.length {
+            layoutManager.addTemporaryAttribute(.backgroundColor, value: accent.withAlphaComponent(0.6), forCharacterRange: range)
+        }
+    }
+
+    private func applyText(to view: MarkdownTextView, coordinator: Coordinator) {
         guard coordinator.text?.attributed !== text.attributed else { return }
         let previous = coordinator.text
         coordinator.text = text
@@ -707,6 +739,8 @@ struct SelectableMarkdownText: NSViewRepresentable {
     final class Coordinator {
         var text: MarkdownAttributedText?
         var sizeForWidth: [CGFloat: CGSize] = [:]
+        var findHighlights: ChatFindTextHighlights?
+        var findAccent: NSColor?
         let fade = AppendedTextFade()
     }
 }

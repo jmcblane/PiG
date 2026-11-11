@@ -17,6 +17,7 @@ struct InboxColumn: View {
     @State private var dropTargetID: String?
     @State private var dropAfter = false
     @State private var revealedItemID: String?
+    @AppStorage(InboxColumn.visibilityKey) private var pinned = true
 
     private var resolvedIDs: [String] { model.sessionInboxIDs.filter(model.isInboxItemResolvable) }
 
@@ -78,6 +79,7 @@ struct InboxColumn: View {
             }
             .buttonStyle(TitlebarIconButtonStyle())
             .help("Settings")
+            .accessibilityLabel("Settings")
             Spacer(minLength: 4)
             if model.canUndoInboxDismissal {
                 Button {
@@ -86,7 +88,7 @@ struct InboxColumn: View {
                     Image(systemName: "arrow.uturn.backward")
                 }
                 .buttonStyle(TitlebarIconButtonStyle())
-                .accessibilityLabel("Undo")
+                .accessibilityLabel("Reopen")
                 .help("Reopen (⇧⌘T)")
             }
             Button {
@@ -95,7 +97,16 @@ struct InboxColumn: View {
                 Image(systemName: "archivebox")
             }
             .buttonStyle(TitlebarIconButtonStyle())
-            .help("All sessions and archive (⌘F)")
+            .help("All chats (⇧⌘F)")
+            .accessibilityLabel("All chats")
+            Button {
+                withAnimation(.smooth(duration: 0.22)) { pinned.toggle() }
+            } label: {
+                Image(systemName: pinned ? "pin.fill" : "pin")
+            }
+            .buttonStyle(TitlebarIconButtonStyle(active: pinned))
+            .help(pinned ? "Unpin sidebar (⌘S)" : "Pin sidebar (⌘S)")
+            .accessibilityLabel(pinned ? "Unpin sidebar" : "Pin sidebar")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -307,9 +318,7 @@ private struct InboxLaunchRow: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 1)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contextMenu {
-            if kind == .chat { NewChatMenuItems() } else { NewQuickChatMenuItems() }
-        }
+        .accessibilityLabel(kind == .chat ? "New chat" : "New quick chat")
     }
 }
 
@@ -327,9 +336,10 @@ private struct InboxDot: View {
 private struct InboxWorkingDots: View {
     @Environment(\.appTheme) private var appTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var occlusion = AppOcclusion.shared
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.08, paused: reduceMotion)) { context in
+        TimelineView(.animation(minimumInterval: 0.08, paused: reduceMotion || !occlusion.isVisible)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             HStack(spacing: 2) {
                 ForEach(0..<3, id: \.self) { index in
@@ -629,7 +639,7 @@ private struct InboxSessionListRow: View {
                 .offset(x: -revealAmount)
                 .accessibilityLabel("\(title), \(projectName)")
                 .accessibilityValue("\(loaded ? "Loaded" : "Unloaded"), \(needsInput ? "needs input" : working ? "working" : finishedUnseen ? "new reply" : "idle")")
-                .accessibilityHint(working ? "Working sessions stay in the inbox." : "Swipe left or press Delete to reveal Done.")
+                .accessibilityHint(working ? "Working chats stay in open chats." : "Swipe left or press Delete to reveal Done.")
                 .onKeyPress(.delete) {
                     revealForKeyboard()
                     return .handled
@@ -715,17 +725,23 @@ private struct InboxSessionListRow: View {
     @ViewBuilder private var statusIndicator: some View {
         if needsInput {
             InboxDot(color: appTheme.brass).help("Needs input")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Needs input")
         } else if working && !selected {
             InboxWorkingDots().help("Working")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Working")
         } else if finishedUnseen {
             InboxDot(color: appTheme.good).help("New reply")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("New reply")
         }
     }
 
     private func revealForKeyboard() {
         guard !compact else { return }
         guard !working else {
-            model.statusLine = "A working session cannot be marked done."
+            model.statusLine = "A working chat cannot be marked done."
             return
         }
         revealedItemID = itemID
@@ -745,7 +761,7 @@ private struct InboxSessionListRow: View {
 
     private func complete() {
         guard !working else {
-            model.statusLine = "A working session cannot be marked done."
+            model.statusLine = "A working chat cannot be marked done."
             return
         }
         revealedItemID = nil
@@ -759,7 +775,7 @@ private struct InboxSessionListRow: View {
             suppressSelection = false
         case .changed(let translation):
             guard !working else {
-                model.statusLine = "A working session cannot be marked done."
+                model.statusLine = "A working chat cannot be marked done."
                 return
             }
             revealedItemID = itemID

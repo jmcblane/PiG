@@ -6,6 +6,13 @@ struct PiRelease: Equatable {
     let note: String?
 }
 
+enum PiUpdateCheckState {
+    case notChecked
+    case succeeded
+    case failed
+    case skipped
+}
+
 struct PiPackageUpdate: Identifiable, Hashable {
     let source: String
     let displayName: String
@@ -28,7 +35,6 @@ enum PiUpdateAction: String, CaseIterable, Identifiable {
         case .models: return "Refresh Model Catalogs"
         }
     }
-    var progressTitle: String { self == .models ? "Refreshing Model Catalogs" : "Updating Pi" }
     var arguments: [String] {
         switch self {
         case .pi: return ["update"]
@@ -37,24 +43,13 @@ enum PiUpdateAction: String, CaseIterable, Identifiable {
         case .models: return ["update", "--models"]
         }
     }
+    var command: String { "pi " + arguments.joined(separator: " ") }
     var includesPi: Bool { self == .pi || self == .all }
-    var includesExtensions: Bool { self == .extensions || self == .all }
 }
 
-enum PiMaintenanceSheet: Identifiable, Equatable {
-    case updates
-    case changelog
-    case confirm(PiUpdateAction)
-    case progress
-
-    var id: String {
-        switch self {
-        case .updates: return "updates"
-        case .changelog: return "changelog"
-        case .confirm: return "confirm"
-        case .progress: return "progress"
-        }
-    }
+enum PiChangelogWindow {
+    case main
+    case settings
 }
 
 private struct PiLatestVersionResponse: Decodable {
@@ -122,8 +117,8 @@ private enum PiMaintenanceIO {
         }
     }
 
-    static func checkPackageUpdates(cwd: String) async -> [PiPackageUpdate] {
-        guard let index = PiPaths.piDistIndex else { return [] }
+    static func checkPackageUpdates(cwd: String) async -> [PiPackageUpdate]? {
+        guard let index = PiPaths.piDistIndex else { return nil }
         let script = """
         import { pathToFileURL } from 'node:url';
         const m = await import(pathToFileURL(process.argv[1]).href);
@@ -143,7 +138,7 @@ private enum PiMaintenanceIO {
         guard result.0 == 0,
               let marker = result.1.range(of: "PIG_JSON:", options: .backwards),
               let data = String(result.1[marker.upperBound...]).data(using: .utf8),
-              let decoded = try? JSONDecoder().decode([PiPackageUpdateResponse].self, from: data) else { return [] }
+              let decoded = try? JSONDecoder().decode([PiPackageUpdateResponse].self, from: data) else { return nil }
         return decoded.map { PiPackageUpdate(source: $0.source, displayName: $0.displayName, scope: $0.scope) }
     }
 
@@ -201,17 +196,6 @@ private enum PiMaintenanceIO {
         return entries
     }
 
-    static func newer(_ candidate: String, than current: String) -> Bool {
-        let lhs = candidate.split(separator: ".").prefix(3).map { Int($0) ?? 0 }
-        let rhs = current.split(separator: ".").prefix(3).map { Int($0) ?? 0 }
-        for index in 0..<3 {
-            let l = index < lhs.count ? lhs[index] : 0
-            let r = index < rhs.count ? rhs[index] : 0
-            if l != r { return l > r }
-        }
-        return false
-    }
-
     private static func piArguments(_ arguments: [String]) -> [String] {
         PiPaths.piExecutable.path == "/usr/bin/env" ? ["pi"] + arguments : arguments
     }
@@ -246,12 +230,15 @@ final class PiMaintenanceController: ObservableObject {
     @Published private(set) var installedVersion = "—"
     @Published private(set) var latestRelease: PiRelease?
     @Published private(set) var packageUpdates: [PiPackageUpdate] = []
+    @Published private(set) var releaseCheckState: PiUpdateCheckState = .notChecked
+    @Published private(set) var packageCheckState: PiUpdateCheckState = .notChecked
     @Published private(set) var isChecking = false
     @Published private(set) var isUpdating = false
     @Published private(set) var updateOutput = ""
     @Published private(set) var updateSucceeded: Bool?
-    @Published private(set) var updateAction: PiUpdateAction = .pi
-    @Published var sheet: PiMaintenanceSheet?
+    @Published private(set) var updateAction: PiUpdateAction?
+    @Published private(set) var pendingAction: PiUpdateAction?
+    @Published var changelogWindow: PiChangelogWindow?
     @Published private(set) var changelogMarkdown = ""
     @Published private(set) var changelogTitle = "What’s New in Pi"
     @Published private(set) var contextPath = FileManager.default.homeDirectoryForCurrentUser.path
@@ -261,12 +248,12 @@ final class PiMaintenanceController: ObservableObject {
     private var dismissedReleaseVersion: String?
     private var dismissedPackageIDs = Set<String>()
     private var started = false
-    var onExtensionsUpdated: (() -> Void)?
+    private var checkQueued = false
     var onModelsUpdated: (() -> Void)?
 
     var availableRelease: PiRelease? {
         guard let latestRelease,
-              PiMaintenanceIO.newer(latestRelease.version, than: installedVersion),
+              isNewerVersion(latestRelease.version, than: installedVersion),
               dismissedReleaseVersion != latestRelease.version else { return nil }
         return latestRelease
     }
@@ -280,8 +267,8 @@ final class PiMaintenanceController: ObservableObject {
         started = true
         setContext(cwd: cwd, projectName: projectName)
         Task {
-            await loadInstalledVersionAndChangelog(automatic: true)
-            await checkForUpdates(cwd: cwd, projectName: projectName)
+            await loadInstalledVersionAndChangelog(presentingIn: .main)
+            await checkForUpdates(cwd: cwd, projectName: projectName, refreshInstalledVersion: false)
         }
     }
 
@@ -293,53 +280,82 @@ final class PiMaintenanceController: ObservableObject {
     func presentUpdates(cwd: String, projectName: String?, requestedAction: PiUpdateAction? = nil) {
         setContext(cwd: cwd, projectName: projectName)
         if let requestedAction {
-            sheet = .confirm(requestedAction)
-        } else {
-            sheet = .updates
-            Task { await checkForUpdates(cwd: cwd, projectName: projectName) }
+            requestUpdate(requestedAction)
+        } else if !isUpdating {
+            pendingAction = nil
         }
+        SettingsTab.open(.pi)
+        Task { await checkForUpdates() }
     }
 
-    func openChangelog(showAll: Bool = true) {
+    func openChangelog(showAll: Bool = true, in window: PiChangelogWindow = .main) {
         let entries = PiMaintenanceIO.changelogEntries()
         changelogTitle = "What’s New in Pi"
         changelogMarkdown = showAll
             ? entries.map(\.markdown).joined(separator: "\n\n")
             : changelogMarkdown
         if changelogMarkdown.isEmpty { changelogMarkdown = "No changelog entries found." }
-        sheet = .changelog
+        changelogWindow = window
     }
 
-    func checkForUpdates(cwd: String? = nil, projectName: String? = nil) async {
+    func checkForUpdates(cwd: String? = nil, projectName: String? = nil, refreshInstalledVersion: Bool = true) async {
         if let cwd { setContext(cwd: cwd, projectName: projectName) }
-        guard !isChecking, !isUpdating else { return }
+        guard !isUpdating else { return }
+        guard !isChecking else {
+            checkQueued = true
+            return
+        }
         isChecking = true
         defer { isChecking = false }
 
-        let current = await PiMaintenanceIO.capturePi(arguments: ["--version"], cwd: contextPath)
-        if current.0 == 0 {
-            let value = current.1.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty { installedVersion = value }
-        }
+        var refreshVersion = refreshInstalledVersion
+        repeat {
+            checkQueued = false
+            if refreshVersion {
+                let current = await PiMaintenanceIO.capturePi(arguments: ["--version"], cwd: contextPath)
+                if current.0 == 0 {
+                    let value = current.1.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !value.isEmpty { installedVersion = value }
+                }
+            }
 
-        async let release = fetchLatestRelease(currentVersion: installedVersion)
-        async let packages = PiMaintenanceIO.checkPackageUpdates(cwd: contextPath)
-        latestRelease = await release
-        packageUpdates = await packages
-        dismissedPackageIDs.formIntersection(Set(packageUpdates.map(\.id)))
+            async let release = fetchLatestRelease(currentVersion: installedVersion)
+            async let packages = PiMaintenanceIO.checkPackageUpdates(cwd: contextPath)
+            let releaseResult = await release
+            latestRelease = releaseResult.release
+            releaseCheckState = releaseResult.state
+            let packageResult = await packages
+            packageUpdates = packageResult ?? []
+            packageCheckState = packageResult == nil ? .failed : .succeeded
+            dismissedPackageIDs.formIntersection(Set(packageUpdates.map(\.id)))
+            refreshVersion = true
+        } while checkQueued
     }
 
     func requestUpdate(_ action: PiUpdateAction) {
-        sheet = .confirm(action)
+        guard !isUpdating else { return }
+        dismissUpdateResult()
+        pendingAction = action
+    }
+
+    func cancelPendingUpdate() {
+        pendingAction = nil
+    }
+
+    func dismissUpdateResult() {
+        guard !isUpdating else { return }
+        updateAction = nil
+        updateSucceeded = nil
+        updateOutput = ""
     }
 
     func runConfirmedUpdate(_ action: PiUpdateAction) {
         guard !isUpdating else { return }
         isUpdating = true
+        pendingAction = nil
         updateAction = action
         updateSucceeded = nil
-        updateOutput = "$ pi \(action.arguments.joined(separator: " "))\n\n"
-        sheet = .progress
+        updateOutput = "$ \(action.command)\n\n"
         Task {
             let exitCode = await PiMaintenanceIO.streamPi(arguments: action.arguments, cwd: contextPath) { [weak self] chunk in
                 self?.updateOutput += chunk.strippingTerminalControlSequences
@@ -348,12 +364,11 @@ final class PiMaintenanceController: ObservableObject {
             updateSucceeded = exitCode == 0
             if exitCode == 0 {
                 if action != .models {
-                    await loadInstalledVersionAndChangelog(automatic: action.includesPi)
+                    await loadInstalledVersionAndChangelog(presentingIn: action.includesPi ? .settings : nil)
                 }
                 await checkForUpdates()
-                if action.includesExtensions { onExtensionsUpdated?() }
                 if action == .models {
-                    updateOutput += "\nModel catalogs refreshed. Idle PiG session runtimes are being reloaded; reload working runtimes after they settle.\n"
+                    updateOutput += "\nModel catalogs refreshed. Idle PiG chat runtimes are being reloaded; reload working runtimes after they settle.\n"
                     onModelsUpdated?()
                 }
             } else if updateOutput.last != "\n" {
@@ -374,7 +389,7 @@ final class PiMaintenanceController: ObservableObject {
         dismissedPackageIDs.formUnion(packageUpdates.map(\.id))
     }
 
-    private func loadInstalledVersionAndChangelog(automatic: Bool) async {
+    private func loadInstalledVersionAndChangelog(presentingIn window: PiChangelogWindow?) async {
         let result = await PiMaintenanceIO.capturePi(arguments: ["--version"], cwd: contextPath)
         guard result.0 == 0 else { return }
         let version = result.1.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -386,23 +401,23 @@ final class PiMaintenanceController: ObservableObject {
             await PiMaintenanceIO.markChangelogSeen(version: version, cwd: contextPath)
             return
         }
-        let newEntries = PiMaintenanceIO.changelogEntries().filter { PiMaintenanceIO.newer($0.version, than: lastVersion) }
+        let newEntries = PiMaintenanceIO.changelogEntries().filter { isNewerVersion($0.version, than: lastVersion) }
         guard !newEntries.isEmpty else { return }
         changelogMarkdown = newEntries.map(\.markdown).joined(separator: "\n\n")
         changelogTitle = "Pi \(version)"
         await PiMaintenanceIO.markChangelogSeen(version: version, cwd: contextPath)
-        guard automatic else { return }
+        guard let window else { return }
         if settings.collapsed {
             installedUpdateNoticeVersion = version
         } else {
-            sheet = .changelog
+            changelogWindow = window
         }
     }
 
-    private func fetchLatestRelease(currentVersion: String) async -> PiRelease? {
+    private func fetchLatestRelease(currentVersion: String) async -> (release: PiRelease?, state: PiUpdateCheckState) {
         let environment = await PiEnvironment.mergedAsync()
-        if environment["PI_OFFLINE"] != nil || environment["PI_SKIP_VERSION_CHECK"] != nil { return nil }
-        guard let url = URL(string: "https://pi.dev/api/latest-version") else { return nil }
+        if environment["PI_OFFLINE"] != nil || environment["PI_SKIP_VERSION_CHECK"] != nil { return (nil, .skipped) }
+        guard let url = URL(string: "https://pi.dev/api/latest-version") else { return (nil, .failed) }
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -410,10 +425,10 @@ final class PiMaintenanceController: ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200,
-                  let decoded = try? JSONDecoder().decode(PiLatestVersionResponse.self, from: data) else { return nil }
-            return PiRelease(version: decoded.version, note: decoded.note?.trimmingCharacters(in: .whitespacesAndNewlines))
+                  let decoded = try? JSONDecoder().decode(PiLatestVersionResponse.self, from: data) else { return (nil, .failed) }
+            return (PiRelease(version: decoded.version, note: decoded.note?.trimmingCharacters(in: .whitespacesAndNewlines)), .succeeded)
         } catch {
-            return nil
+            return (nil, .failed)
         }
     }
 }

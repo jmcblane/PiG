@@ -5,8 +5,6 @@ import UserNotifications
 struct GeneralSettingsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.appTheme) private var appTheme
-    @State private var piExecutablePath = PiExecutablePreference.path ?? ""
-    @State private var detectedPiPath = PiPaths.detectedPiExecutable.path
     @State private var notificationsDenied = false
     @AppStorage(QuickChatsFolderPreference.key) private var quickChatsFolder = ""
     @AppStorage(TerminalPaneMode.buttonDefaultKey) private var terminalButtonMode = TerminalPaneMode.full
@@ -22,16 +20,10 @@ struct GeneralSettingsView: View {
                 terminalSection
                 quickChatsSection
                 notificationsSection
-                piExecutableSection
-                extensionStatusSection
             }
             .padding(20)
         }
-        .task {
-            await refreshNotificationStatus()
-            _ = await PiEnvironment.mergedAsync()
-            detectedPiPath = PiPaths.detectedPiExecutable.path
-        }
+        .task { await refreshNotificationStatus() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await refreshNotificationStatus() }
         }
@@ -71,7 +63,7 @@ struct GeneralSettingsView: View {
     }
 
     private var sessionsSection: some View {
-        GlowSection("Sessions") {
+        GlowSection("Chats") {
             GlowRow("Runtime") {
                 GlowSegmented(selection: $model.sessionRuntimePolicy, options: SessionRuntimePolicy.allCases, label: { $0.displayName })
             }
@@ -86,7 +78,7 @@ struct GeneralSettingsView: View {
             SettingsToggleRow(title: "Accent composer on focus", isOn: $model.composerFocusAccent)
             SettingsToggleRow(
                 title: "Interactive HTML in replies",
-                subtitle: "Lets the agent add small interactive controls to chat. Applies to sessions started after you change it.",
+                subtitle: "Lets the agent add small interactive controls to chat. Applies to chats started after you change it.",
                 isOn: $htmlRenderEnabled
             )
         }
@@ -163,55 +155,6 @@ struct GeneralSettingsView: View {
         }
     }
 
-    private var piExecutableSection: some View {
-        GlowSection("Pi executable") {
-            GlowBlockRow {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Override path")
-                        .font(AppFonts.ui(13))
-                        .foregroundStyle(appTheme.text)
-                    GlowTextField(detectedPiPathLabel, text: $piExecutablePath, monospaced: true)
-                        .onChange(of: piExecutablePath) { _, value in PiExecutablePreference.path = value }
-                }
-            }
-            GlowBlockRow {
-                HStack(spacing: 8) {
-                    piExecutableStatus
-                    Spacer()
-                    Button("Choose…") { choosePiExecutable() }
-                        .buttonStyle(GlowButtonStyle())
-                    Button("Clear") { piExecutablePath = "" }
-                        .buttonStyle(GlowButtonStyle())
-                        .disabled(piExecutablePath.isEmpty)
-                }
-            }
-        }
-    }
-
-    private var extensionStatusSection: some View {
-        GlowSection("Extension status items") {
-            if model.extensionStatusKeys.isEmpty {
-                GlowBlockRow {
-                    Text("Status items appear here after an extension in a loaded session reports one.")
-                        .font(AppFonts.ui(12.5))
-                        .foregroundStyle(appTheme.muted)
-                }
-            } else {
-                ForEach(model.extensionStatusKeys, id: \.self) { key in
-                    SettingsToggleRow(
-                        title: model.extensionStatusLabel(for: key),
-                        isOn: Binding(
-                            get: { !model.hiddenExtensionStatusKeys.contains(key) },
-                            set: { visible in
-                                model.setExtensionStatusHidden(key, hidden: !visible)
-                            }
-                        )
-                    )
-                }
-            }
-        }
-    }
-
     private var textSizePercent: Int {
         Int((TextSizePreference.steps[model.textSizeStep] * 100).rounded())
     }
@@ -225,48 +168,9 @@ struct GeneralSettingsView: View {
         }
     }
 
-    private var detectedPiPathLabel: String {
-        detectedPiPath == "/usr/bin/env" ? "pi not found on PATH" : detectedPiPath
-    }
-
-    @ViewBuilder
-    private var piExecutableStatus: some View {
-        if let path = piExecutablePath.nonEmptyTrimmed {
-            if FileManager.default.isExecutableFile(atPath: (path as NSString).expandingTildeInPath) {
-                Label("Executable found", systemImage: "checkmark.circle")
-                    .font(AppFonts.ui(12))
-                    .foregroundStyle(appTheme.muted)
-            } else {
-                Label("Not found or not executable", systemImage: "exclamationmark.triangle.fill")
-                    .font(AppFonts.ui(12))
-                    .foregroundStyle(.orange)
-            }
-        } else {
-            Label("Using auto-detected pi", systemImage: "magnifyingglass")
-                .font(AppFonts.ui(12))
-                .foregroundStyle(appTheme.muted)
-        }
-    }
-
     private func refreshNotificationStatus() async {
         let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
         notificationsDenied = status == .denied
-    }
-
-    private func choosePiExecutable() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.treatsFilePackagesAsDirectories = true
-        panel.showsHiddenFiles = true
-        let current = piExecutablePath.nonEmptyTrimmed.map { ($0 as NSString).expandingTildeInPath } ?? detectedPiPath
-        panel.directoryURL = URL(fileURLWithPath: current).deletingLastPathComponent()
-        panel.prompt = "Choose"
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                piExecutablePath = url.path
-            }
-        }
     }
 
     private func chooseQuickChatsFolder() {
@@ -286,7 +190,7 @@ struct GeneralSettingsView: View {
 }
 
 /// Labeled glow switch row, with an optional muted line under the title.
-private struct SettingsToggleRow: View {
+struct SettingsToggleRow: View {
     @Environment(\.appTheme) private var appTheme
     let title: String
     var subtitle: String? = nil
