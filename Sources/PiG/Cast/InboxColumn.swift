@@ -38,7 +38,7 @@ struct InboxColumn: View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    // The title bar has new-chat buttons; the list offers them only when it's empty.
+                    // The sidebar header has new-chat buttons; the list offers them only when it's empty.
                     if rootIDs.isEmpty {
                         InboxLaunchRow(kind: .chat)
                         InboxLaunchRow(kind: .quickChat)
@@ -123,35 +123,58 @@ extension EnvironmentValues {
 
 /// Collapsed open chats: icons float on the window background and expand into the
 /// full list, over the chat, after a short hover. Rows keep their positions when it
-/// expands, so the icon under the pointer does not move.
+/// expands, so the icon under the pointer does not move. Expanded, it also covers the
+/// top bar with the sidebar header.
 struct InboxRail: View {
     /// Full window size, so the backdrop copy lines up with the real one.
     let windowSize: CGSize
     @State private var expanded = false
+    @State private var hoveringList = false
+    @State private var hoveringHeader = false
+    @State private var roomMenuOpen = false
     @State private var hoverTask: Task<Void, Never>?
 
     var body: some View {
-        InboxColumn()
-            .environment(\.inboxCompact, !expanded)
-            // Reveal the full-width layout instead of resizing it.
-            .frame(width: expanded ? InboxColumn.width : InboxColumn.railWidth, alignment: .leading)
-            .clipped()
-            .contentShape(Rectangle())
-            .background(alignment: .leading) {
-                // Always mounted: inserting and removing the AppKit blur made it pop in
-                // and out ahead of the SwiftUI fade, which read as a flash.
-                InboxOverlayBackdrop(windowSize: windowSize, visible: expanded)
-                    .frame(width: InboxColumn.width + 48)
-                    .allowsHitTesting(false)
-            }
-            .onHover { inside in
-                hoverTask?.cancel()
-                hoverTask = Task {
-                    try? await Task.sleep(for: .milliseconds(50))
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.easeOut(duration: Self.fadeDuration)) { expanded = inside }
+        VStack(alignment: .leading, spacing: 0) {
+            // Collapsed, the header is hidden and leaves the top bar to the window.
+            SidebarHeader(roomMenuOpen: $roomMenuOpen)
+                .background { WindowDragArea() }
+                .opacity(expanded ? 1 : 0)
+                .allowsHitTesting(expanded)
+                .onHover { inside in
+                    hoveringHeader = inside
+                    updateExpanded()
                 }
-            }
+            InboxColumn()
+                .frame(width: expanded ? InboxColumn.width : InboxColumn.railWidth, alignment: .leading)
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    hoveringList = inside
+                    updateExpanded()
+                }
+        }
+        .environment(\.inboxCompact, !expanded)
+        // Reveal the full-width layout instead of resizing it.
+        .frame(width: expanded ? InboxColumn.width : InboxColumn.railWidth, alignment: .leading)
+        .clipped()
+        .background(alignment: .leading) {
+            // Always mounted: inserting and removing the AppKit blur made it pop in
+            // and out ahead of the SwiftUI fade, which read as a flash.
+            InboxOverlayBackdrop(windowSize: windowSize, visible: expanded)
+                .frame(width: InboxColumn.width + 48)
+                .allowsHitTesting(false)
+        }
+        .onChange(of: roomMenuOpen) { updateExpanded() }
+    }
+
+    private func updateExpanded() {
+        let target = hoveringList || roomMenuOpen || (expanded && hoveringHeader)
+        hoverTask?.cancel()
+        hoverTask = Task {
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: Self.fadeDuration)) { expanded = target }
+        }
     }
 
     static let fadeDuration = 0.14

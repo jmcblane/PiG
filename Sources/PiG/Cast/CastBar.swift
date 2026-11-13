@@ -2,26 +2,45 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-/// Window top bar: inbox toggle, files, the current room (project or agent), new-chat
-/// buttons, and window controls.
+/// Window top bar: the sidebar header while the sidebar is pinned, then files and
+/// window controls.
 struct CastBar: View {
     static let height: CGFloat = 44
+
+    @AppStorage(InboxColumn.visibilityKey) private var inboxVisible = true
+    @State private var roomMenuOpen = false
 
     var body: some View {
         ZStack {
             WindowDragArea()
             HStack(spacing: 0) {
-                Color.clear.frame(width: 78)
-                CastFilesButton()
-                CastRoomButton()
-                NewChatButtons()
-                    .padding(.leading, 6)
+                if inboxVisible {
+                    SidebarHeader(roomMenuOpen: $roomMenuOpen)
+                } else {
+                    Color.clear.frame(width: 78)
+                }
                 Spacer(minLength: 0)
                 CastTrailingControls()
                     .padding(.trailing, 12)
             }
         }
         .frame(height: Self.height)
+    }
+}
+
+/// Traffic-light row of the sidebar: the current room and new-chat buttons.
+struct SidebarHeader: View {
+    @Binding var roomMenuOpen: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 78)
+            CastRoomButton(open: $roomMenuOpen)
+            Spacer(minLength: 6)
+            NewChatButtons()
+                .padding(.trailing, 10)
+        }
+        .frame(width: InboxColumn.width, height: CastBar.height)
     }
 }
 
@@ -52,7 +71,7 @@ private struct NewChatButtons: View {
 private struct CastRoomButton: View {
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
-    @State private var open = false
+    @Binding var open: Bool
 
     private var roomAgent: Agent? {
         if let agent = model.selectedAgent { return agent }
@@ -121,7 +140,6 @@ private struct CastFilesButton: View {
         .disabled(projectPath == nil)
         .help("Files")
         .accessibilityLabel("Files")
-        .padding(.trailing, 4)
         .popover(isPresented: $open, arrowEdge: .bottom) {
             Group {
                 if let projectPath {
@@ -154,8 +172,9 @@ private struct CastTrailingControls: View {
             }
             .buttonStyle(.plain)
             .font(AppFonts.ui(12.5, weight: .semibold))
-            TitlebarTerminalButton()
+            CastFilesButton()
                 .padding(.leading, 10)
+            TitlebarTerminalButton()
             CustomActionsToolbarButton()
         }
         .fixedSize()

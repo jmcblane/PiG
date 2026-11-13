@@ -25,14 +25,16 @@ struct RootView: View {
                             ChatPaneView(controller: model.selectedController)
                                 .padding(.leading, inboxVisible ? 0 : InboxColumn.railWidth)
                         }
-                        if !inboxVisible {
-                            InboxRail(windowSize: size)
-                                .transition(.opacity)
-                        }
                     }
                     .clipped()
                 }
                 .frame(width: size.width, height: size.height)
+
+                if !inboxVisible {
+                    InboxRail(windowSize: size)
+                        .frame(height: size.height)
+                        .transition(.opacity)
+                }
 
                 VStack(alignment: .trailing, spacing: 8) {
                     PiMaintenanceHost(controller: model.piMaintenance, theme: model.selectedTheme)
