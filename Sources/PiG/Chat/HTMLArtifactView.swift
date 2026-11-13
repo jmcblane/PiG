@@ -165,6 +165,11 @@ struct HTMLArtifactView: View {
     }
 
     @ViewBuilder private var utilityMenu: some View {
+        Button("Open in Window…") {
+            HTMLArtifactWindowController.show(
+                artifact: artifact, theme: theme, textStyle: textStyle, appTheme: appTheme, onSendMessage: onSendMessage
+            )
+        }
         Button("View Source…") { showsSource = true }
         Button("Copy HTML") {
             NSPasteboard.general.clearContents()
@@ -194,10 +199,12 @@ struct HTMLArtifactView: View {
     }
 }
 
-private struct HTMLArtifactWebView: NSViewRepresentable {
+struct HTMLArtifactWebView: NSViewRepresentable {
     let artifact: HTMLArtifact
     let theme: AppThemeChoice
     let textStyle: TextStyle
+    var pageZoom: CGFloat = 1
+    var scrollsHorizontally = false
     let onHeight: (CGFloat) -> Void
     let onAction: (HTMLWidgetAction) -> Void
     let onError: (String) -> Void
@@ -244,12 +251,15 @@ private struct HTMLArtifactWebView: NSViewRepresentable {
         coordinator.onAction = onAction
         coordinator.onError = onError
         webView.underPageBackgroundColor = theme.palette.background.nsColor
+        if webView.pageZoom != pageZoom { webView.pageZoom = pageZoom }
         if coordinator.artifact != artifact || coordinator.theme != theme || coordinator.textStyle != textStyle {
             coordinator.artifact = artifact
             coordinator.theme = theme
             coordinator.textStyle = textStyle
             coordinator.loadedDocument = nil
-            coordinator.document = HTMLWidgetDocument.make(artifact: artifact, theme: theme, textStyle: textStyle)
+            coordinator.document = HTMLWidgetDocument.make(
+                artifact: artifact, theme: theme, textStyle: textStyle, scrollsHorizontally: scrollsHorizontally
+            )
         }
         coordinator.loadIfNeeded(in: webView)
     }

@@ -52,7 +52,7 @@ enum HTMLWidgetDocument {
         """
     }
 
-    static func make(artifact: HTMLArtifact, theme: AppThemeChoice, textStyle: TextStyle) -> String {
+    static func make(artifact: HTMLArtifact, theme: AppThemeChoice, textStyle: TextStyle, scrollsHorizontally: Bool = false) -> String {
         let palette = theme.palette
         let scale = Double(textStyle.scale)
         let fontFamily = cssFontFamily(textStyle.interfaceFont)
@@ -75,7 +75,7 @@ enum HTMLWidgetDocument {
           }
           * { box-sizing: border-box; }
           html, body { margin: 0; padding: 0; min-height: 0; height: auto; background: var(--pig-bg); }
-          body { color: var(--pig-fg); font: \(15.5 * scale)px \(fontFamily); overflow-x: hidden; }
+          body { color: var(--pig-fg); font: \(15.5 * scale)px \(fontFamily); overflow-x: \(scrollsHorizontally ? "auto" : "hidden"); }
           #pig-widget-root { display: flow-root; padding: 4px; overflow-wrap: anywhere; }
           .pig-controls, [role="group"] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
           button, input, select, textarea { font: inherit; font-size: \(13 * scale)px; }
