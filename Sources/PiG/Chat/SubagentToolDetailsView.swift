@@ -286,26 +286,6 @@ private struct SubagentPresentation: @unchecked Sendable {
     }
 }
 
-@MainActor
-private enum SubagentRunClock {
-    private static var starts: [String: Date] = [:]
-    private static var ends: [String: Date] = [:]
-
-    static func observe(_ key: String, status: SubagentRunStatus) {
-        switch status {
-        case .running:
-            if starts[key] == nil { starts[key] = Date() }
-        case .succeeded, .failed:
-            if starts[key] != nil, ends[key] == nil { ends[key] = Date() }
-        case .queued:
-            break
-        }
-    }
-
-    static func start(_ key: String) -> Date? { starts[key] }
-    static func end(_ key: String) -> Date? { ends[key] }
-}
-
 /// Renders the task/tasks/chain arguments and mode/results details from
 /// ~/.pi/agent/extensions/subagent/index.ts; other tool shapes use the fallback view.
 struct SubagentToolDetailsView: View {
@@ -343,12 +323,9 @@ struct SubagentToolDetailsView: View {
         "\(tool.id)|\(tool.status.rawValue)|\(tool.arguments.count)|\(tool.result.count)|\(tool.details?.count ?? 0)"
     }
 
-    private func clockKey(_ run: SubagentRun) -> String { "\(tool.id)#\(run.id)" }
-
     private func observe(_ next: SubagentPresentation) {
         let previous = Dictionary((presentation?.runs ?? []).map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first })
         for run in next.runs {
-            SubagentRunClock.observe(clockKey(run), status: run.status)
             if let before = previous[run.id], !before.isFinished, run.status.isFinished {
                 finishedWhileShown.insert(run.id)
             }
@@ -441,16 +418,6 @@ struct SubagentToolDetailsView: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
                 .help(run.model ?? "")
-            if let start = SubagentRunClock.start(clockKey(run)) {
-                SubagentElapsedText(start: start, end: SubagentRunClock.end(clockKey(run)), isRunning: run.status == .running)
-                    .font(AppFonts.ui(11))
-                    .monospacedDigit()
-                    .foregroundStyle(appTheme.muted)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .frame(minWidth: AppFonts.scaled(30), alignment: .trailing)
-                    .layoutPriority(3)
-            }
             Image(systemName: "chevron.right")
                 .font(AppFonts.ui(9, weight: .bold))
                 .foregroundStyle(appTheme.muted)
@@ -507,22 +474,6 @@ struct SubagentToolDetailsView: View {
         }
     }
 
-}
-
-private struct SubagentElapsedText: View {
-    let start: Date
-    let end: Date?
-    let isRunning: Bool
-
-    var body: some View {
-        if let end {
-            Text(TurnTiming.format(end.timeIntervalSince(start)))
-        } else if isRunning {
-            TimelineView(.periodic(from: start, by: 1)) { context in
-                Text(TurnTiming.format(context.date.timeIntervalSince(start)))
-            }
-        }
-    }
 }
 
 private struct SubagentRunBody: View {
