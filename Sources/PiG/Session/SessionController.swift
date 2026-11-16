@@ -104,6 +104,7 @@ final class SessionController: ObservableObject, Identifiable {
     }
     /// Live state of tools run by `background` jobs, keyed by the `background` call id.
     @Published var backgroundJobTools: [String: ToolDisplay] = [:]
+    @Published var nestedBackgroundCalls: [String: [ToolDisplay]] = [:]
     @Published var extensionUIWidgets: [String: ExtensionUIWidget] = [:]
     @Published var extensionWindowTitle: String?
     @Published var messageScrollRequest: MessageScrollRequest?

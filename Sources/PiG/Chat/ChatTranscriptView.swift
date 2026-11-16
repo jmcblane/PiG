@@ -25,10 +25,12 @@ protocol ChatTranscriptSource: ObservableObject {
     var htmlActionTarget: SessionController? { get }
     /// Live tools of running `background` jobs, keyed by the `background` call id.
     var backgroundJobTools: [String: ToolDisplay] { get }
+    var nestedBackgroundCalls: [String: [ToolDisplay]] { get }
 }
 
 extension ChatTranscriptSource {
     var backgroundJobTools: [String: ToolDisplay] { [:] }
+    var nestedBackgroundCalls: [String: [ToolDisplay]] { [:] }
     var trailingActivityText: String? { nil }
 }
 
@@ -83,7 +85,8 @@ struct ChatScrollView<Controller: ChatTranscriptSource>: View {
             visibleMessages: controller.visibleMessages,
             isAgentActive: controller.isWorking,
             showThinkingTraces: model.showThinkingTraces,
-            backgroundJobTools: controller.backgroundJobTools
+            backgroundJobTools: controller.backgroundJobTools,
+            nestedBackgroundCalls: controller.nestedBackgroundCalls
         )
     }
 
@@ -423,15 +426,17 @@ private enum TranscriptPresentationItem: Identifiable {
 /// `SessionController`), then finished, pointing at the message that delivered its result.
 private struct BackgroundJobRows {
     private let live: [String: ToolDisplay]
+    private let nested: [String: [ToolDisplay]]
     /// Finished job tools by `background` call id, with the id of their result message.
     private var finished: [String: (tool: ToolDisplay, messageID: String)] = [:]
 
-    init(messages: [ChatMessage], live: [String: ToolDisplay]) {
+    init(messages: [ChatMessage], live: [String: ToolDisplay], nested: [String: [ToolDisplay]]) {
         self.live = live
+        self.nested = nested
         // Job numbers restart with each pi process, so pair every result with the
         // most recent unanswered `background` call that has its number.
         var pending: [Int: String] = [:]
-        for message in messages {
+        for message in withNested(messages) {
             for tool in message.tools where tool.name == "background" {
                 if let id = Self.jobID(of: tool) { pending[id] = tool.id }
             }
@@ -445,6 +450,7 @@ private struct BackgroundJobRows {
     }
 
     func apply(_ messages: [ChatMessage]) -> [ChatMessage] {
+        let messages = withNested(messages)
         guard !live.isEmpty || !finished.isEmpty else { return messages }
         return messages.map { message in
             guard message.tools.contains(where: { $0.name == "background" }) else { return message }
@@ -466,6 +472,16 @@ private struct BackgroundJobRows {
         row.images = []
         row.backgroundJob?.resultMessageID = messageID
         return row
+    }
+
+    private func withNested(_ messages: [ChatMessage]) -> [ChatMessage] {
+        guard !nested.isEmpty else { return messages }
+        return messages.map { message in
+            guard message.tools.contains(where: { nested[$0.id] != nil }) else { return message }
+            var message = message
+            message.tools = message.tools.flatMap { [$0] + (nested[$0.id] ?? []) }
+            return message
+        }
     }
 
     private static func jobID(of tool: ToolDisplay) -> Int? {
@@ -513,8 +529,8 @@ private struct TranscriptToolPresentation {
     }
 
     init(messages: [ChatMessage], visibleMessages: [ChatMessage], isAgentActive: Bool, showThinkingTraces: Bool,
-         backgroundJobTools: [String: ToolDisplay] = [:]) {
-        let jobs = BackgroundJobRows(messages: messages, live: backgroundJobTools)
+         backgroundJobTools: [String: ToolDisplay] = [:], nestedBackgroundCalls: [String: [ToolDisplay]] = [:]) {
+        let jobs = BackgroundJobRows(messages: messages, live: backgroundJobTools, nested: nestedBackgroundCalls)
         let messages = jobs.apply(messages)
         let visibleMessages = jobs.apply(visibleMessages)
         let visibleMessageIDs = Set(visibleMessages.map(\.id))

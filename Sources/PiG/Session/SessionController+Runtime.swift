@@ -26,6 +26,7 @@ extension SessionController {
         startupTask?.cancel()
         resetStreamingState()
         backgroundJobTools.removeAll()
+        nestedBackgroundCalls.removeAll()
         rpc?.stop()
         rpc = nil
         markRPCInactive()

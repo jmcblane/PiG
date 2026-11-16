@@ -7,7 +7,11 @@ extension SessionController {
         // tool and never appear in the transcript, except the tool a `background`
         // job runs: it outlives its parent call, so it gets its own live row.
         if type.hasPrefix("tool_execution_"), let parentID = event["parentToolCallId"] as? String {
-            updateBackgroundJobRow(event, type: type, parentID: parentID)
+            if event["toolName"] as? String == "background" {
+                updateNestedBackgroundCall(event, type: type, parentID: parentID)
+            } else {
+                updateBackgroundJobRow(event, type: type, parentID: parentID)
+            }
             return
         }
         recoveryRevision &+= 1
@@ -199,7 +203,7 @@ extension SessionController {
     /// as parent and keep arriving after that call and its turn have ended. The
     /// transcript shows this state on the `background` row. Deeper nested calls stay hidden.
     private func updateBackgroundJobRow(_ event: [String: Any], type: String, parentID: String) {
-        guard let parent = findTool(parentID), parent.name == "background" else { return }
+        guard let parent = findTool(parentID) ?? nestedBackgroundCall(parentID), parent.name == "background" else { return }
         // The job number is in the `background` result, which can arrive after the job starts.
         let parentDetails = parent.details
             .flatMap { $0.data(using: .utf8) }
@@ -235,6 +239,37 @@ extension SessionController {
             )
         )
         streamingFrameToken += 1
+    }
+
+    private func updateNestedBackgroundCall(_ event: [String: Any], type: String, parentID: String) {
+        guard let callID = event["toolCallId"] as? String, findTool(parentID) != nil else { return }
+        var calls = nestedBackgroundCalls[parentID] ?? []
+        let index = calls.firstIndex { $0.id == callID }
+        var tool = index.map { calls[$0] } ?? ToolDisplay(
+            id: callID,
+            name: "background",
+            arguments: event["args"].map(jsonString) ?? "",
+            result: "",
+            status: .running,
+            isError: false
+        )
+        if type == "tool_execution_end" {
+            if event["isError"] as? Bool == true {
+                calls.removeAll { $0.id == callID }
+                nestedBackgroundCalls[parentID] = calls.isEmpty ? nil : calls
+                return
+            }
+            let result = event["result"] as? [String: Any]
+            tool.status = .succeeded
+            tool.result = SessionParser.contentText(result?["content"])
+            tool.details = result?["details"].map(jsonString)
+        }
+        if let index { calls[index] = tool } else { calls.append(tool) }
+        nestedBackgroundCalls[parentID] = calls
+    }
+
+    private func nestedBackgroundCall(_ id: String) -> ToolDisplay? {
+        nestedBackgroundCalls.values.lazy.flatMap { $0 }.first { $0.id == id }
     }
 
     private func mergeToolResult(_ result: [String: Any]) {
