@@ -566,7 +566,7 @@ struct AgentEditorView: View {
     private func missingEntry(_ value: String, detail: String, remove: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(appTheme.warning)
             VStack(alignment: .leading, spacing: 1) {
                 Text(value.abbreviatingHomeDirectory())
                     .lineLimit(1)

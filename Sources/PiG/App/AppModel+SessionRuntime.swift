@@ -9,6 +9,7 @@ extension AppModel {
             item.stopRPC()
             count += 1
         }
+        count += unloadOtherACPSessions(keepingID: controller == nil ? selectedACPChatID : nil)
         statusLine = "Unloaded \(count) idle chat\(count == 1 ? "" : "s")."
     }
 
@@ -19,6 +20,7 @@ extension AppModel {
             item.stopRPC()
             count += 1
         }
+        count += unloadAllIdleACPSessions(includeSelected: includeSelected)
         statusLine = "Unloaded \(count) idle chat\(count == 1 ? "" : "s")."
     }
 
@@ -107,6 +109,7 @@ extension AppModel {
             landingDraftController.hasCompleteModelCatalog = false
             loadLandingSlashCommands(for: landingDraftController)
         }
+        refreshAntigravityCatalog()
         await loadSessionNamingModels()
 
         let candidates = controllers.values.filter { isIdlePersistentRuntime($0) }
@@ -161,6 +164,7 @@ extension AppModel {
         landingDraftController?.stopRPC()
         hermesLandingDraftController?.stop()
         for controller in hermesControllers.values { controller.stop() }
+        for controller in acpControllers.values { controller.stopProcess() }
     }
 
     func startSessionUnloadPolling() {
@@ -181,6 +185,7 @@ extension AppModel {
             controller.stopRPC()
         }
         enforceLoadedSessionLimit()
+        enforceACPSessionUnloadPolicy()
     }
 
     func enforceLoadedSessionLimit() {

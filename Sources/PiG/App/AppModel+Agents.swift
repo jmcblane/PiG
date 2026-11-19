@@ -34,8 +34,6 @@ extension AppModel {
         selectedControllerID = nil
         selectedAgentID = agentID
         selectedProjectPath = agent.backend == .pi ? agent.workingDirectory : nil
-        landingDraftText = ""
-        landingDraftImages = []
         if agent.backend == .pi {
             prepareLandingDraft()
             Task { [weak self] in
@@ -282,7 +280,9 @@ extension AppModel {
     }
 
     func openNotification(_ info: [AnyHashable: Any]) async {
-        if let agentID = info["agentID"] as? String, let chatID = info["hermesChatID"] as? String {
+        if let acpChatID = info["acpChatID"] as? String {
+            selectACPChat(acpChatID)
+        } else if let agentID = info["agentID"] as? String, let chatID = info["hermesChatID"] as? String {
             selectHermesChat(agentID: agentID, chatID: chatID)
         } else if let path = info["sessionPath"] as? String {
             let key = AgentSessionStore.standardizedPath(path)

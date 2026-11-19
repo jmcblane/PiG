@@ -2,8 +2,16 @@ import SwiftUI
 import AppKit
 import ImageIO
 
-/// What the shared transcript reads. Pi (`SessionController`) and Hermes
-/// (`HermesChatController`) chats conform so both render through `ChatScrollView`.
+/// Target for interactive `<button data-pig-action="...">` clicks in `html_render` widgets.
+@MainActor
+protocol HTMLWidgetActionTarget: AnyObject {
+    @discardableResult
+    func sendHTMLWidgetMessage(_ text: String) async -> Bool
+}
+
+/// What the shared transcript reads. Pi (`SessionController`), Hermes
+/// (`HermesChatController`), and ACP (`ACPChatController`) chats conform so all
+/// render through `ChatScrollView`.
 @MainActor
 protocol ChatTranscriptSource: ObservableObject {
     var id: String { get }
@@ -22,7 +30,7 @@ protocol ChatTranscriptSource: ObservableObject {
     var messageScrollRequest: MessageScrollRequest? { get }
     var bottomScrollRequest: Int { get }
     /// Receives HTML widget actions; nil disables them.
-    var htmlActionTarget: SessionController? { get }
+    var htmlActionTarget: (any HTMLWidgetActionTarget)? { get }
     /// Live tools of running `background` jobs, keyed by the `background` call id.
     var backgroundJobTools: [String: ToolDisplay] { get }
     var nestedBackgroundCalls: [String: [ToolDisplay]] { get }
@@ -34,9 +42,11 @@ extension ChatTranscriptSource {
     var trailingActivityText: String? { nil }
 }
 
+extension SessionController: HTMLWidgetActionTarget {}
+
 extension SessionController: ChatTranscriptSource {
     var transcriptProjectPath: String? { projectPath }
-    var htmlActionTarget: SessionController? { self }
+    var htmlActionTarget: (any HTMLWidgetActionTarget)? { self }
 }
 
 private struct RevealMessageKey: EnvironmentKey {
@@ -732,7 +742,10 @@ private struct TranscriptToolPresentation {
             images: new.images.isEmpty ? old.images : new.images,
             status: new.status,
             isError: old.isError || new.isError,
-            userLabel: new.userLabel ?? old.userLabel
+            userLabel: new.userLabel ?? old.userLabel,
+            backgroundJob: new.backgroundJob ?? old.backgroundJob,
+            acpTitle: new.acpTitle ?? old.acpTitle,
+            acpKind: new.acpKind ?? old.acpKind
         )
     }
 }
@@ -750,7 +763,7 @@ struct ChatMessageRow: View, Equatable {
     let isHighlighted: Bool
     var showsActivityIndicator = true
     var htmlArtifacts: [String: HTMLArtifact] = [:]
-    var htmlActionTarget: SessionController? = nil
+    var htmlActionTarget: (any HTMLWidgetActionTarget)? = nil
     var turnTiming: TurnTiming? = nil
     var findHighlights: ChatFindMessageHighlights? = nil
     var onFork: (() -> Void)? = nil

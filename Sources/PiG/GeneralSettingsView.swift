@@ -134,7 +134,7 @@ struct GeneralSettingsView: View {
                     HStack {
                         Label("Notifications are turned off for PiG in System Settings.", systemImage: "exclamationmark.triangle.fill")
                             .font(AppFonts.ui(12))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(appTheme.warning)
                         Spacer()
                         Button("Open System Settings") {
                             if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {

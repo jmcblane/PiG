@@ -54,7 +54,7 @@ struct ComposerView: View {
                 .transition(.opacity)
             }
             VStack(spacing: 0) {
-                if showsLandingResources {
+                if showsLandingResources && !ModelInfo.isAntigravityACP(id: controller.selectedModelID) {
                     SessionResourceStrip(controller: controller)
                 }
                 LastErrorAffordance(error: controller.errorText) { controller.errorText = nil }
@@ -330,6 +330,25 @@ struct ComposerView: View {
             projectPath: controller.projectPath
         ).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty || !imageAttachments.isEmpty else { return }
+
+        if model.landingDraftController?.id == controller.id,
+           ModelInfo.isAntigravityACP(id: controller.selectedModelID) {
+            let submittedImages = imageAttachments
+            draft = ""
+            imageAttachments = []
+            entryHeight = max(36, AppFonts.scaled(15.5) + 20)
+            model.launchACPChatFromLanding(
+                text: normalized,
+                images: submittedImages,
+                projectPath: controller.projectPath,
+                isQuickChat: controller.isQuickChat,
+                modelID: controller.selectedModelID,
+                thinkingLevel: controller.thinkingLevel,
+                modeID: model.landingACPModeID
+            )
+            return
+        }
+
         let submittedDraft = draft
         let submittedImages = imageAttachments
         let previousFailureID = controller.failedPrompt?.id
@@ -353,7 +372,7 @@ struct ComposerView: View {
     }
 }
 
-private struct ComposerImageAttachmentsView: View {
+struct ComposerImageAttachmentsView: View {
     @Environment(\.appTheme) private var appTheme
     let images: [ImageAttachment]
     let remove: (String) -> Void

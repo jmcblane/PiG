@@ -211,11 +211,11 @@ private struct PiSettingsForm: View {
 
     private var releaseStatus: (text: String, color: Color) {
         if maintenance.isChecking { return ("Checking for updates…", appTheme.muted) }
-        if let availableRelease { return ("Pi \(availableRelease.version) is available", .orange) }
+        if let availableRelease { return ("Pi \(availableRelease.version) is available", appTheme.warning) }
         switch maintenance.releaseCheckState {
         case .notChecked: return ("Not checked yet", appTheme.muted)
         case .succeeded: return ("Up to date", appTheme.palette.good.color)
-        case .failed: return ("Couldn’t check for a new version of pi", .orange)
+        case .failed: return ("Couldn’t check for a new version of pi", appTheme.warning)
         case .skipped: return ("Version check is off because PI_OFFLINE or PI_SKIP_VERSION_CHECK is set", appTheme.muted)
         }
     }
@@ -224,7 +224,7 @@ private struct PiSettingsForm: View {
         if maintenance.isChecking { return ("Checking extensions…", appTheme.muted) }
         switch maintenance.packageCheckState {
         case .notChecked: return ("Not checked yet", appTheme.muted)
-        case .failed: return ("Couldn’t check extensions for updates", .orange)
+        case .failed: return ("Couldn’t check extensions for updates", appTheme.warning)
         case .skipped: return ("Extension check skipped", appTheme.muted)
         case .succeeded:
             let count = maintenance.packageUpdates.count
@@ -276,7 +276,7 @@ private struct PiSettingsForm: View {
             } else {
                 Label("Not found or not executable", systemImage: "exclamationmark.triangle.fill")
                     .font(AppFonts.ui(12))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(appTheme.warning)
             }
         } else {
             Label("Using auto-detected pi", systemImage: "magnifyingglass")

@@ -87,6 +87,7 @@ struct AppThemePalette: Hashable {
     let muted: ThemeRGB
     let accent: ThemeRGB
     let danger: ThemeRGB
+    let warning: ThemeRGB
     let good: ThemeRGB
     let userRow: ThemeRGB
     let codeText: ThemeRGB
@@ -200,6 +201,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0x9ca1aa),
                 accent: ThemeRGB(hex: 0x4ca8ff),
                 danger: ThemeRGB(hex: 0xff6b61),
+                warning: ThemeRGB(hex: 0xf0b24a),
                 good: ThemeRGB(hex: 0x65c88d),
                 userRow: ThemeRGB(hex: 0x303236),
                 codeText: ThemeRGB(hex: 0xa5ceff),
@@ -230,6 +232,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0x948aa9),
                 accent: ThemeRGB(hex: 0xffb38a),
                 danger: ThemeRGB(hex: 0xff8fae),
+                warning: ThemeRGB(hex: 0xf6c977),
                 good: ThemeRGB(hex: 0x8fe3c4),
                 userRow: ThemeRGB(hex: 0x382f50),
                 codeText: ThemeRGB(hex: 0xffc9a8),
@@ -260,6 +263,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0x8b95aa),
                 accent: ThemeRGB(hex: 0x5cb0ff),
                 danger: ThemeRGB(hex: 0xff7a72),
+                warning: ThemeRGB(hex: 0xf2ba5c),
                 good: ThemeRGB(hex: 0x6fd6b8),
                 userRow: ThemeRGB(hex: 0x2e3549),
                 codeText: ThemeRGB(hex: 0xa8d1ff),
@@ -290,6 +294,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0x8590a3),
                 accent: ThemeRGB(hex: 0x88c0d0),
                 danger: ThemeRGB(hex: 0xd27b84),
+                warning: ThemeRGB(hex: 0xebcb8b),
                 good: ThemeRGB(hex: 0xa3be8c),
                 userRow: ThemeRGB(hex: 0x3b4253),
                 codeText: ThemeRGB(hex: 0x8fbcbb),
@@ -320,6 +325,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0x737aa2),
                 accent: ThemeRGB(hex: 0x7aa2f7),
                 danger: ThemeRGB(hex: 0xf7768e),
+                warning: ThemeRGB(hex: 0xe0af68),
                 good: ThemeRGB(hex: 0x9ece6a),
                 userRow: ThemeRGB(hex: 0x333954),
                 codeText: ThemeRGB(hex: 0x7dcfff),
@@ -350,6 +356,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0x8a85a3),
                 accent: ThemeRGB(hex: 0xc4a7e7),
                 danger: ThemeRGB(hex: 0xeb6f92),
+                warning: ThemeRGB(hex: 0xf6c177),
                 good: ThemeRGB(hex: 0x9ccfd8),
                 userRow: ThemeRGB(hex: 0x2f2b45),
                 codeText: ThemeRGB(hex: 0xf6c177),
@@ -380,6 +387,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0xa2a9b0),
                 accent: ThemeRGB(hex: 0x78a9ff),
                 danger: ThemeRGB(hex: 0xff7eb6),
+                warning: ThemeRGB(hex: 0xf1c21b),
                 good: ThemeRGB(hex: 0x42be65),
                 userRow: ThemeRGB(hex: 0x27282e),
                 codeText: ThemeRGB(hex: 0xbe95ff),
@@ -410,6 +418,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0xa2a9b0),
                 accent: ThemeRGB(hex: 0x78a9ff),
                 danger: ThemeRGB(hex: 0xff7eb6),
+                warning: ThemeRGB(hex: 0xf1c21b),
                 good: ThemeRGB(hex: 0x42be65),
                 userRow: ThemeRGB(hex: 0x262626),
                 codeText: ThemeRGB(hex: 0xbe95ff),
@@ -440,6 +449,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(red: 0.627, green: 0.627, blue: 0.627),
                 accent: ThemeRGB(red: 0.522, green: 0.678, blue: 0.831),     // #85add4
                 danger: ThemeRGB(red: 0.839, green: 0.529, blue: 0.529),     // #d68787
+                warning: ThemeRGB(hex: 0xd8af5f),
                 good: ThemeRGB(red: 0.373, green: 0.525, blue: 0.373),       // #5f865f
                 userRow: ThemeRGB(red: 0.267, green: 0.267, blue: 0.267),
                 codeText: ThemeRGB(red: 0.847, green: 0.686, blue: 0.373),
@@ -470,6 +480,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(red: 0.482, green: 0.518, blue: 0.580),        // #7b8494
                 accent: ThemeRGB(red: 0.533, green: 0.753, blue: 0.816),       // #88c0d0
                 danger: ThemeRGB(red: 0.749, green: 0.380, blue: 0.416),       // #bf616a
+                warning: ThemeRGB(hex: 0xebcb8b),
                 good: ThemeRGB(red: 0.639, green: 0.745, blue: 0.549),         // #a3be8c
                 userRow: ThemeRGB(red: 0.231, green: 0.259, blue: 0.322),
                 codeText: ThemeRGB(red: 0.561, green: 0.737, blue: 0.733),     // #8fbcbb
@@ -500,6 +511,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(red: 0.431, green: 0.416, blue: 0.525),        // #6e6a86
                 accent: ThemeRGB(red: 0.769, green: 0.655, blue: 0.906),       // #c4a7e7
                 danger: ThemeRGB(red: 0.922, green: 0.435, blue: 0.573),       // #eb6f92
+                warning: ThemeRGB(hex: 0xf6c177),
                 good: ThemeRGB(red: 0.612, green: 0.812, blue: 0.847),         // #9ccfd8
                 userRow: ThemeRGB(red: 0.149, green: 0.137, blue: 0.227),
                 codeText: ThemeRGB(red: 0.965, green: 0.757, blue: 0.467),     // #f6c177
@@ -530,6 +542,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(red: 0.427, green: 0.427, blue: 0.486),        // #6d6d7c
                 accent: ThemeRGB(red: 0.635, green: 0.467, blue: 1.000),       // #a277ff
                 danger: ThemeRGB(red: 1.000, green: 0.404, blue: 0.404),       // #ff6767
+                warning: ThemeRGB(hex: 0xffca85),
                 good: ThemeRGB(red: 0.380, green: 1.000, blue: 0.792),         // #61ffca
                 userRow: ThemeRGB(red: 0.133, green: 0.106, blue: 0.200),      // #221b33
                 codeText: ThemeRGB(red: 1.000, green: 0.792, blue: 0.522),     // #ffca85
@@ -555,11 +568,12 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 panel2: ThemeRGB(red: 0.173, green: 0.192, blue: 0.227),       // #2c313a
                 line: ThemeRGB(red: 0.243, green: 0.267, blue: 0.318),         // #3e4451
                 lineBright: ThemeRGB(red: 0.380, green: 0.686, blue: 0.937),   // #61afef
-                text: ThemeRGB(red: 0.671, green: 0.698, blue: 0.749),         // #abb2bf
-                secondaryText: ThemeRGB(red: 0.784, green: 0.800, blue: 0.831),// #c8ccd4
+                text: ThemeRGB(red: 0.784, green: 0.800, blue: 0.831),         // #c8ccd4
+                secondaryText: ThemeRGB(red: 0.671, green: 0.698, blue: 0.749),// #abb2bf
                 muted: ThemeRGB(red: 0.361, green: 0.388, blue: 0.439),        // #5c6370
                 accent: ThemeRGB(red: 0.380, green: 0.686, blue: 0.937),       // #61afef
                 danger: ThemeRGB(red: 0.878, green: 0.424, blue: 0.459),       // #e06c75
+                warning: ThemeRGB(hex: 0xe5c07b),
                 good: ThemeRGB(red: 0.596, green: 0.765, blue: 0.475),         // #98c379
                 userRow: ThemeRGB(red: 0.184, green: 0.204, blue: 0.243),      // #2f343e
                 codeText: ThemeRGB(red: 0.820, green: 0.604, blue: 0.400),     // #d19a66
@@ -584,12 +598,13 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 panel: ThemeRGB(hex: 0x191919),
                 panel2: ThemeRGB(hex: 0x2c2c2c),
                 line: ThemeRGB(hex: 0x3a3a3a),
-                lineBright: ThemeRGB(hex: 0xfc618d),
+                lineBright: ThemeRGB(hex: 0x5ad4e6),
                 text: ThemeRGB(hex: 0xf7f1ff),
                 secondaryText: ThemeRGB(hex: 0xd8d2df),
                 muted: ThemeRGB(hex: 0x8f8997),
-                accent: ThemeRGB(hex: 0xfc618d),
+                accent: ThemeRGB(hex: 0x5ad4e6),
                 danger: ThemeRGB(hex: 0xfc618d),
+                warning: ThemeRGB(hex: 0xfce566),
                 good: ThemeRGB(hex: 0x7bd88f),
                 userRow: ThemeRGB(hex: 0x2c2c2c),
                 codeText: ThemeRGB(hex: 0xfce566),
@@ -620,6 +635,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0x737d85),
                 accent: ThemeRGB(hex: 0xa65c00),
                 danger: ThemeRGB(hex: 0xb73232),
+                warning: ThemeRGB(hex: 0xb36b00),
                 good: ThemeRGB(hex: 0x557400),
                 userRow: ThemeRGB(hex: 0xf0eee4),
                 codeText: ThemeRGB(hex: 0x874b00),
@@ -650,6 +666,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0x59636e),
                 accent: ThemeRGB(hex: 0x0969da),
                 danger: ThemeRGB(hex: 0xb42318),
+                warning: ThemeRGB(hex: 0x9a6700),
                 good: ThemeRGB(hex: 0x1a7f37),
                 userRow: ThemeRGB(hex: 0xf6f8fa),
                 codeText: ThemeRGB(hex: 0x8250df),
@@ -680,6 +697,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0x9da9a0),
                 accent: ThemeRGB(hex: 0xa7c080),
                 danger: ThemeRGB(hex: 0xe67e80),
+                warning: ThemeRGB(hex: 0xdbbc7f),
                 good: ThemeRGB(hex: 0x83c092),
                 userRow: ThemeRGB(hex: 0x343f44),
                 codeText: ThemeRGB(hex: 0xdbbc7f),
@@ -710,6 +728,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0xa7aec4),
                 accent: ThemeRGB(hex: 0xbd93f9),
                 danger: ThemeRGB(hex: 0xff5555),
+                warning: ThemeRGB(hex: 0xffb86c),
                 good: ThemeRGB(hex: 0x50fa7b),
                 userRow: ThemeRGB(hex: 0x44475a),
                 codeText: ThemeRGB(hex: 0xf1fa8c),
@@ -740,6 +759,7 @@ enum AppThemeChoice: String, CaseIterable, Identifiable, Hashable {
                 muted: ThemeRGB(hex: 0x8992b0),
                 accent: ThemeRGB(hex: 0x7aa2f7),
                 danger: ThemeRGB(hex: 0xf7768e),
+                warning: ThemeRGB(hex: 0xe0af68),
                 good: ThemeRGB(hex: 0x9ece6a),
                 userRow: ThemeRGB(hex: 0x292e42),
                 codeText: ThemeRGB(hex: 0xe0af68),
@@ -856,6 +876,7 @@ struct AppTheme: Hashable {
         choice == .monokaiProSpectrum ? ThemeRGB(hex: 0xfce566).color : palette.accent.color
     }
     var danger: Color { palette.danger.color }
+    var warning: Color { palette.warning.color }
     var good: Color { palette.good.color }
     var userRow: Color { palette.userRow.color }
     var codeText: Color { palette.codeText.color }

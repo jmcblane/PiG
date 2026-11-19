@@ -75,7 +75,11 @@ extension SessionController {
     func refreshNewSessionDefaults() {
         guard createdAsNewSession || agentID != nil, sessionPath == nil,
               messages.isEmpty || (agentID != nil && messages.allSatisfy { $0.role == .system }), !isProcessActive else { return }
-        if !hasExplicitModelSelection { selectedModelID = agentConfiguration?()?.modelID ?? DefaultModelSchedule.effectiveModelID() ?? "" }
+        if !hasExplicitModelSelection {
+            let scheduled = DefaultModelSchedule.effectiveModelID() ?? ""
+            let fallback = (agentID != nil && ModelInfo.isAntigravityACP(id: scheduled)) ? "" : scheduled
+            selectedModelID = agentConfiguration?()?.modelID ?? fallback
+        }
         if !hasExplicitThinkingSelection { thinkingLevel = agentConfiguration?()?.thinking ?? GlobalThinkingSelection.level }
     }
 
@@ -83,6 +87,7 @@ extension SessionController {
         hasExplicitModelSelection = true
         selectedModelID = id
         guard let model = models.first(where: { $0.id == id }) else { return }
+        guard !model.isAntigravityACP else { return }
         guard isProcessActive || sessionPath != nil else { return }
         Task {
             do {
@@ -114,7 +119,9 @@ extension SessionController {
     }
 
     func applyAgentChatDefaults(using client: PiRPCClient) async throws {
-        let preferredID = agentConfiguration?()?.modelID ?? DefaultModelSchedule.effectiveModelID() ?? ""
+        let scheduled = DefaultModelSchedule.effectiveModelID() ?? ""
+        let fallback = ModelInfo.isAntigravityACP(id: scheduled) ? "" : scheduled
+        let preferredID = agentConfiguration?()?.modelID ?? fallback
         guard let model = models.first(where: { $0.id == preferredID }) else {
             throw PiRPCClient.RPCError.commandFailed("The agent's default model is unavailable. Choose a model in the composer.")
         }

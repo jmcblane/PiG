@@ -42,11 +42,7 @@ struct PiGApp: App {
             }
             CommandGroup(replacing: .newItem) {
                 Button("New Chat") {
-                    if let agent = model.selectedAgent {
-                        model.selectAgent(agent.id)
-                    } else {
-                        model.showNewChatHome()
-                    }
+                    model.startNewChat()
                 }
                 .keyboardShortcut("n", modifiers: .command)
                 Button("New Quick Chat") {
@@ -112,9 +108,9 @@ struct PiGApp: App {
             }
             CommandMenu("Chat") {
                 ForEach(Array(quickModels.enumerated()), id: \.offset) { slot, id in
-                    let quickModel = id.isEmpty ? nil : model.activeComposerController?.models.first(where: { $0.id == id })
+                    let quickModel = quickModelInfo(for: id)
                     Button(quickModel?.name ?? "Quick Model \(slot + 1)") {
-                        model.activeComposerController?.setModel(id)
+                        applyQuickModel(id)
                     }
                     .keyboardShortcut(KeyEquivalent(Character(String(slot + 1))), modifiers: .command)
                     .disabled(quickModel == nil)
@@ -131,7 +127,7 @@ struct PiGApp: App {
 
         Settings {
             SettingsWindowView()
-                .frame(width: 600, height: 800)
+                .frame(minWidth: 560, idealWidth: 620, minHeight: 540, idealHeight: 680)
                 .environmentObject(model)
                 .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textStyle: model.textStyle))
                 .preferredColorScheme(model.selectedTheme.isLight ? .light : .dark)
@@ -148,5 +144,21 @@ struct PiGApp: App {
 
     private var quickModels: [String] {
         [quickModel1, quickModel2, quickModel3, quickModel4, quickModel5]
+    }
+
+    private func quickModelInfo(for id: String) -> ModelInfo? {
+        guard !id.isEmpty else { return nil }
+        if let acp = model.selectedACPController {
+            return acp.models.first(where: { $0.id == id })
+        }
+        return model.activeComposerController?.models.first(where: { $0.id == id })
+    }
+
+    private func applyQuickModel(_ id: String) {
+        if let acp = model.selectedACPController {
+            Task { await acp.setModel(id) }
+        } else {
+            model.activeComposerController?.setModel(id)
+        }
     }
 }

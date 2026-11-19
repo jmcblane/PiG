@@ -5,7 +5,8 @@ let package = Package(
     name: "PiG",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "PiG", targets: ["PiG"])
+        .executable(name: "PiG", targets: ["PiG"]),
+        .executable(name: "pig-html-mcp", targets: ["pig-html-mcp"])
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0")
@@ -18,6 +19,10 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"])
             ]
+        ),
+        .executableTarget(
+            name: "pig-html-mcp",
+            path: "Sources/PiGHTMLMCP"
         ),
         .testTarget(
             name: "PiGTests",

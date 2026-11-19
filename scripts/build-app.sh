@@ -123,13 +123,21 @@ fi
 echo "Building $APP_NAME ($CONFIG)…"
 # Native keeps the binary at .build/$CONFIG and skips compiling SwiftTerm's
 # Metal shaders, which needs Xcode's separately installed Metal Toolchain.
-swift build -c "$CONFIG" --build-system native --scratch-path "$BUILD_DIR"
+swift_flags=()
+if [[ -z "${CI-}" ]]; then
+  swift_flags=(-Xswiftc -no-whole-module-optimization)
+fi
+swift build -c "$CONFIG" --build-system native --scratch-path "$BUILD_DIR" ${swift_flags[@]+"${swift_flags[@]}"}
 
 echo "Creating app bundle: $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$EXECUTABLE" "$APP/Contents/MacOS/$APP_NAME"
 chmod +x "$APP/Contents/MacOS/$APP_NAME"
+if [[ -f "$BUILD_DIR/$CONFIG/pig-html-mcp" ]]; then
+  cp "$BUILD_DIR/$CONFIG/pig-html-mcp" "$APP/Contents/MacOS/pig-html-mcp"
+  chmod +x "$APP/Contents/MacOS/pig-html-mcp"
+fi
 cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
 cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
 cp -R "$ROOT_DIR/Resources/extensions" "$APP/Contents/Resources/extensions"

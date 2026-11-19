@@ -13,18 +13,29 @@ final class PiGAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
 
     @MainActor
     func confirmStoppingWork() -> Bool {
-        guard let working = model?.controllers.values.filter(\.hasLiveWork), !working.isEmpty else {
+        let workingPi = model?.controllers.values.filter(\.hasLiveWork) ?? []
+        let workingACP = model?.acpControllers.values.filter(\.hasLiveWork) ?? []
+        let totalCount = workingPi.count + workingACP.count
+        guard totalCount > 0 else {
             return true
         }
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        if working.count == 1, let controller = working.first {
-            let title = controller.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = title.isEmpty || title == "Untitled" ? controller.projectName : title
+        if totalCount == 1 {
+            let name: String
+            if let controller = workingPi.first {
+                let title = controller.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                name = title.isEmpty || title == "Untitled" ? controller.projectName : title
+            } else if let acp = workingACP.first {
+                let title = acp.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                name = title.isEmpty || title == "Untitled" ? URL(fileURLWithPath: acp.projectPath).lastPathComponent : title
+            } else {
+                name = "Chat"
+            }
             alert.messageText = "Quit PiG while “\(name)” is working?"
         } else {
-            alert.messageText = "Quit PiG while \(working.count) chats are working?"
+            alert.messageText = "Quit PiG while \(totalCount) chats are working?"
         }
         alert.informativeText = "Running agent work and background jobs will be stopped."
         alert.addButton(withTitle: "Quit")
@@ -89,6 +100,7 @@ final class PiGAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let info = response.notification.request.content.userInfo
+        let acpChatID = info["acpChatID"] as? String
         let agentID = info["agentID"] as? String
         let hermesChatID = info["hermesChatID"] as? String
         let controllerID = info["controllerID"] as? String
@@ -96,6 +108,7 @@ final class PiGAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
         Task { @MainActor [weak self] in
             guard let model = self?.model else { return }
             var userInfo: [AnyHashable: Any] = [:]
+            userInfo["acpChatID"] = acpChatID
             userInfo["agentID"] = agentID
             userInfo["hermesChatID"] = hermesChatID
             userInfo["controllerID"] = controllerID

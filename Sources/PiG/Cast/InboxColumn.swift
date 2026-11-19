@@ -38,10 +38,9 @@ struct InboxColumn: View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    // The sidebar header has new-chat buttons; the list offers them only when it's empty.
+                    // The sidebar header has a new-chat button; the list offers it when empty.
                     if rootIDs.isEmpty {
-                        InboxLaunchRow(kind: .chat)
-                        InboxLaunchRow(kind: .quickChat)
+                        InboxLaunchRow()
                     }
                     ForEach(rootIDs, id: \.self) { itemID in
                         row(itemID, isChild: model.inboxParentID(for: itemID) != nil)
@@ -123,36 +122,20 @@ extension EnvironmentValues {
 
 /// Collapsed open chats: icons float on the window background and expand into the
 /// full list, over the chat, after a short hover. Rows keep their positions when it
-/// expands, so the icon under the pointer does not move. Expanded, it also covers the
-/// top bar with the sidebar header.
+/// expands, so the icon under the pointer does not move.
 struct InboxRail: View {
     /// Full window size, so the backdrop copy lines up with the real one.
     let windowSize: CGSize
     @State private var expanded = false
-    @State private var hoveringList = false
-    @State private var hoveringHeader = false
-    @State private var roomMenuOpen = false
     @State private var hoverTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Collapsed, the header is hidden and leaves the top bar to the window.
-            SidebarHeader(roomMenuOpen: $roomMenuOpen)
-                .background { WindowDragArea() }
-                .opacity(expanded ? 1 : 0)
-                .allowsHitTesting(expanded)
-                .onHover { inside in
-                    hoveringHeader = inside
-                    updateExpanded()
-                }
-            InboxColumn()
-                .frame(width: expanded ? InboxColumn.width : InboxColumn.railWidth, alignment: .leading)
-                .contentShape(Rectangle())
-                .onHover { inside in
-                    hoveringList = inside
-                    updateExpanded()
-                }
-        }
+        InboxColumn()
+            .frame(width: expanded ? InboxColumn.width : InboxColumn.railWidth, alignment: .leading)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                updateExpanded(inside)
+            }
         .environment(\.inboxCompact, !expanded)
         // Reveal the full-width layout instead of resizing it.
         .frame(width: expanded ? InboxColumn.width : InboxColumn.railWidth, alignment: .leading)
@@ -164,11 +147,9 @@ struct InboxRail: View {
                 .frame(width: InboxColumn.width + 48)
                 .allowsHitTesting(false)
         }
-        .onChange(of: roomMenuOpen) { updateExpanded() }
     }
 
-    private func updateExpanded() {
-        let target = hoveringList || roomMenuOpen || (expanded && hoveringHeader)
+    private func updateExpanded(_ target: Bool) {
         hoverTask?.cancel()
         hoverTask = Task {
             try? await Task.sleep(for: .milliseconds(50))
@@ -285,44 +266,32 @@ private final class BackdropBlurView: NSView {
     }
 }
 
-/// New chat or quick chat, shown as list rows when no chats are open.
+/// New chat entry shown as a list row when no chats are open.
 private struct InboxLaunchRow: View {
-    enum Kind { case chat, quickChat }
-
     @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
     @Environment(\.inboxCompact) private var compact
-    let kind: Kind
     @State private var hovering = false
 
-    private var active: Bool {
-        guard model.isComposingNewChat else { return false }
-        return kind == .quickChat ? model.composingQuickChat : !model.composingQuickChat && model.selectedProjectPath != nil
-    }
+    private var active: Bool { model.isOnNewChatHome }
 
     var body: some View {
         Button {
-            kind == .chat ? model.startNewChat() : model.showNewChatHome(quickChat: true)
+            model.startNewChat()
         } label: {
             HStack(spacing: 10) {
-                Group {
-                    if kind == .chat {
-                        Image(systemName: "plus")
-                            .font(AppFonts.ui(11, weight: .semibold))
-                            .frame(width: 30, height: 30)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .strokeBorder(appTheme.muted.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
-                            )
-                    } else {
-                        ChatIconView(icon: .quickChat, size: 30)
-                    }
-                }
+                Image(systemName: "plus")
+                    .font(AppFonts.ui(11, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(appTheme.muted.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+                    )
                 if !compact {
-                    Text(kind == .chat ? "New chat" : "Quick chat")
+                    Text("New chat")
                         .font(AppFonts.ui(13))
                     Spacer(minLength: 0)
-                    Text(kind == .chat ? "⌘N" : "⇧⌘N")
+                    Text("⌘N")
                         .font(AppFonts.ui(11))
                         .foregroundStyle(appTheme.muted)
                 }
@@ -341,7 +310,7 @@ private struct InboxLaunchRow: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 1)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel(kind == .chat ? "New chat" : "New quick chat")
+        .accessibilityLabel("New chat")
     }
 }
 
@@ -389,7 +358,13 @@ private struct InboxSessionItemRow: View {
 
     var body: some View {
         Group {
-            if let chat = model.inboxHermesChat(for: itemID) {
+            if let chat = model.inboxACPChat(for: itemID) {
+                if let controller = model.acpControllers[chat.id] {
+                    LoadedACPChatRow(chat: chat, controller: controller, revealedItemID: $revealedItemID)
+                } else {
+                    ACPChatRow(chat: chat, revealedItemID: $revealedItemID)
+                }
+            } else if let chat = model.inboxHermesChat(for: itemID) {
                 if let controller = model.hermesControllers[chat.id] {
                     LoadedHermesChatRow(chat: chat, controller: controller, revealedItemID: $revealedItemID)
                 } else {
@@ -577,6 +552,90 @@ private struct HermesChatRow: View {
                     confirmTitle: "Move to Trash",
                     role: .destructive,
                     onConfirm: { _ in model.deleteHermesChat(chatID) }
+                )
+            }
+            .disabled(working)
+        }
+    }
+}
+
+private struct LoadedACPChatRow: View {
+    let chat: ACPChatRecord
+    @ObservedObject var controller: ACPChatController
+    @Binding var revealedItemID: String?
+
+    var body: some View {
+        ACPChatRow(
+            chat: chat,
+            titleOverride: controller.title,
+            revealedItemID: $revealedItemID,
+            working: controller.isWorking,
+            loaded: controller.isProcessActive,
+            needsInput: controller.permissionPrompt != nil
+        )
+    }
+}
+
+private struct ACPChatRow: View {
+    @EnvironmentObject private var model: AppModel
+    let chat: ACPChatRecord
+    var titleOverride: String? = nil
+    @Binding var revealedItemID: String?
+    var working = false
+    var loaded = false
+    var needsInput = false
+
+    private var itemID: String { "acp:\(chat.id)" }
+
+    private var resolvedTitle: String {
+        if let titleOverride, !titleOverride.isEmpty { return titleOverride }
+        return chat.title.isEmpty ? (chat.isQuickChat ? "Quick chat" : "Untitled") : chat.title
+    }
+
+    private var subtitle: String {
+        let place = chat.isQuickChat ? "Quick chat" : model.projectDisplayName(for: chat.projectPath)
+        return "\(place) · \(ACPProvider.antigravityDisplayName)"
+    }
+
+    var body: some View {
+        InboxSessionListRow(
+            title: resolvedTitle,
+            projectName: subtitle,
+            icon: model.chatIcon(for: chat),
+            selected: model.selectedACPChatID == chat.id,
+            working: working,
+            loaded: loaded,
+            finishedUnseen: model.acpUnreadChatIDs.contains(chat.id),
+            needsInput: needsInput,
+            isChild: false,
+            itemID: itemID,
+            revealedItemID: $revealedItemID,
+            done: { model.markInboxItemDone(itemID) },
+            action: { model.selectACPChat(chat.id) }
+        )
+        .contextMenu {
+            Button("Done", systemImage: "checkmark") {
+                revealedItemID = nil
+                model.markInboxItemDone(itemID)
+            }
+            .disabled(working)
+            if loaded {
+                Button("Unload Process", systemImage: "moon.zzz") {
+                    model.unloadACPChat(chat.id)
+                }
+                .disabled(working)
+            }
+            Divider()
+            Button("Remove from PiG…", systemImage: "trash", role: .destructive) {
+                let model = model
+                let chatID = chat.id
+                let title = resolvedTitle
+                model.dialog = GlowDialogRequest(
+                    title: "Remove Antigravity chat from PiG?",
+                    message: "\"\(title)\" will be removed from PiG's list. Antigravity's own session history is unchanged.",
+                    confirmTitle: "Remove",
+                    role: .destructive,
+                    onConfirm: { _ in model.deleteACPChat(chatID) }
                 )
             }
             .disabled(working)

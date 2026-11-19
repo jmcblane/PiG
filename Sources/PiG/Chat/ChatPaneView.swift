@@ -35,7 +35,10 @@ struct ChatPaneView: View {
                 let size = geometry.size.nonZero
                 let chat = chatRect(in: size, workspace: workspace)
                 let terminal = terminalRect(in: size, workspace: workspace)
-                let draftKey = controller?.id ?? model.selectedHermesController.map { "hermes:\($0.chatID)" } ?? "__none__"
+                let draftKey = controller?.id
+                    ?? model.selectedACPController.map { "acp:\($0.id)" }
+                    ?? model.selectedHermesController.map { "hermes:\($0.chatID)" }
+                    ?? "__none__"
 
                 ZStack(alignment: .topLeading) {
                     ChatTabContent(
@@ -142,7 +145,7 @@ struct ChatPaneView: View {
     }
 
     private var currentTerminalWorkingDirectory: String? {
-        controller?.projectPath ?? model.selectedProjectPath
+        controller?.projectPath ?? model.selectedACPController?.projectPath ?? model.selectedProjectPath
     }
 
     private func toggleTerminal() {
@@ -234,6 +237,7 @@ struct ChatPaneView: View {
         case .verticalSplit:
             let available = max(1, size.width - splitHandleThickness)
             let chatWidth = available * clampedSplitFraction(workspace.verticalSplitFraction, available: available)
+            let hit = TerminalSplitResizeHandle.hitThickness
             TerminalSplitResizeHandle(
                 axis: .vertical,
                 fraction: splitFractionBinding(axis: .vertical),
@@ -241,11 +245,13 @@ struct ChatPaneView: View {
                 thickness: splitHandleThickness,
                 minPaneSize: minSplitPaneSize
             )
-            .frame(width: splitHandleThickness, height: size.height)
-            .offset(x: chatWidth, y: 0)
+            .frame(width: hit, height: size.height)
+            .offset(x: chatWidth - (hit - splitHandleThickness) / 2, y: 0)
+            .zIndex(1)
         case .horizontalSplit:
             let available = max(1, size.height - splitHandleThickness)
             let chatHeight = available * clampedSplitFraction(workspace.horizontalSplitFraction, available: available)
+            let hit = TerminalSplitResizeHandle.hitThickness
             TerminalSplitResizeHandle(
                 axis: .horizontal,
                 fraction: splitFractionBinding(axis: .horizontal),
@@ -253,8 +259,9 @@ struct ChatPaneView: View {
                 thickness: splitHandleThickness,
                 minPaneSize: minSplitPaneSize
             )
-            .frame(width: size.width, height: splitHandleThickness)
-            .offset(x: 0, y: chatHeight)
+            .frame(width: size.width, height: hit)
+            .offset(x: 0, y: chatHeight - (hit - splitHandleThickness) / 2)
+            .zIndex(1)
         case .hidden, .full:
             EmptyView()
         }

@@ -30,6 +30,7 @@ extension AppModel {
     }
 
     func isQuickChatInboxItem(_ itemID: String) -> Bool {
+        if let acp = inboxACPChat(for: itemID) { return acp.isQuickChat }
         if let controller = inboxController(for: itemID) { return controller.isQuickChat }
         guard let summary = inboxSummary(for: itemID) else { return false }
         return agentSessionRecords[AgentSessionStore.standardizedPath(summary.filePath)] == nil && isQuickChatsProject(summary.projectPath)
@@ -47,7 +48,9 @@ extension AppModel {
             removedIDs = [itemID]
         }
         guard !removedIDs.contains(where: {
-            inboxController(for: $0)?.hasLiveWork == true || inboxHermesController(for: $0)?.isWorking == true
+            inboxController(for: $0)?.hasLiveWork == true
+                || inboxHermesController(for: $0)?.isWorking == true
+                || inboxACPController(for: $0)?.hasLiveWork == true
         }) else {
             statusLine = "A working chat cannot be marked done."
             return
@@ -65,11 +68,17 @@ extension AppModel {
             return removedIDs.isDisjoint(with: selectedIDs) ? nil : controller.id
         }
         let removedSelectedHermesChatID = selectedHermesChatID.flatMap { removedIDs.contains("hermes:\($0)") ? $0 : nil }
-        let title = inboxHermesChat(for: itemID)?.title ?? inboxController(for: itemID)?.title ?? inboxSummary(for: itemID)?.title ?? "Chat"
+        let removedSelectedACPChatID = selectedACPChatID.flatMap { removedIDs.contains("acp:\($0)") ? $0 : nil }
+        let title = inboxACPChat(for: itemID)?.title
+            ?? inboxHermesChat(for: itemID)?.title
+            ?? inboxController(for: itemID)?.title
+            ?? inboxSummary(for: itemID)?.title
+            ?? "Chat"
         inboxDismissalUndo = InboxDismissalUndo(
             items: removedItems,
             selectedControllerID: removedSelectedControllerID,
             selectedHermesChatID: removedSelectedHermesChatID,
+            selectedACPChatID: removedSelectedACPChatID,
             title: title.isEmpty ? "Untitled" : title
         )
         sessionInboxIDs.removeAll { removedIDs.contains($0) }
@@ -84,9 +93,15 @@ extension AppModel {
             hermesUnreadChatIDs.remove(record.id)
         }
 
-        if removedSelectedControllerID != nil || removedSelectedHermesChatID != nil {
+        for record in acpChats where removedIDs.contains("acp:\(record.id)") {
+            acpControllers[record.id]?.stopProcess()
+            acpUnreadChatIDs.remove(record.id)
+        }
+
+        if removedSelectedControllerID != nil || removedSelectedHermesChatID != nil || removedSelectedACPChatID != nil {
             clearAgentSelection()
             selectedControllerID = nil
+            selectedACPChatID = nil
             composingQuickChat = false
             newChatHomeRequestID += 1
         }
@@ -99,12 +114,16 @@ extension AppModel {
         }
         if let controllerID = undo.selectedControllerID, let controller = controllers[controllerID] {
             clearAgentSelection()
+            selectedACPChatID = nil
             selectedControllerID = controllerID
             selectedProjectPath = controller.projectPath
             composingQuickChat = false
         }
         if let chatID = undo.selectedHermesChatID, let chat = hermesChats.first(where: { $0.id == chatID }) {
             selectHermesChat(agentID: chat.agentID, chatID: chatID)
+        }
+        if let acpChatID = undo.selectedACPChatID, acpChats.contains(where: { $0.id == acpChatID }) {
+            selectACPChat(acpChatID)
         }
         inboxDismissalUndo = nil
         statusLine = "Restored: \(undo.title)"

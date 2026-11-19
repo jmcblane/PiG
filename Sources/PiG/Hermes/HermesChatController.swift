@@ -198,7 +198,7 @@ extension HermesChatController: ChatTranscriptSource {
         visibleMessageLimit = max(visibleMessageLimit, messages.count - index)
         messageScrollRequest = MessageScrollRequest(messageID: messageID)
     }
-    var htmlActionTarget: SessionController? { nil }
+    var htmlActionTarget: (any HTMLWidgetActionTarget)? { nil }
 }
 
 struct HermesProbeResult: Equatable {

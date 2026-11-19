@@ -126,6 +126,8 @@ enum TerminalSplitAxis {
 }
 
 struct TerminalSplitResizeHandle: View {
+    static let hitThickness: CGFloat = 12
+
     @Environment(\.appTheme) private var appTheme
     let axis: TerminalSplitAxis
     @Binding var fraction: CGFloat
@@ -134,23 +136,57 @@ struct TerminalSplitResizeHandle: View {
     let minPaneSize: CGFloat
     @State private var startingFraction: CGFloat?
     @State private var hovering = false
+    @State private var cursorPushed = false
+
+    private var isActive: Bool { hovering || startingFraction != nil }
 
     var body: some View {
-        Rectangle()
-            .fill(hovering ? appTheme.brass.opacity(0.55) : appTheme.line.opacity(0.45))
-            .contentShape(Rectangle())
-            .onHover { hovering = $0 }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let start = startingFraction ?? fraction
-                        startingFraction = start
-                        let available = max(1, total - thickness)
-                        let delta = axis == .vertical ? value.translation.width : value.translation.height
-                        fraction = Self.clamped(start + delta / available, available: available, minPaneSize: minPaneSize)
-                    }
-                    .onEnded { _ in startingFraction = nil }
-            )
+        ZStack {
+            Color.clear
+            Rectangle()
+                .fill(isActive ? appTheme.brass.opacity(0.65) : appTheme.line.opacity(0.45))
+                .frame(
+                    width: axis == .vertical ? thickness : nil,
+                    height: axis == .horizontal ? thickness : nil
+                )
+        }
+        .contentShape(Rectangle())
+        .onHover { over in
+            hovering = over
+            updateCursor()
+        }
+        .onDisappear { popCursorIfNeeded() }
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    let start = startingFraction ?? fraction
+                    startingFraction = start
+                    updateCursor()
+                    let available = max(1, total - thickness)
+                    let delta = axis == .vertical ? value.translation.width : value.translation.height
+                    fraction = Self.clamped(start + delta / available, available: available, minPaneSize: minPaneSize)
+                }
+                .onEnded { _ in
+                    startingFraction = nil
+                    updateCursor()
+                }
+        )
+    }
+
+    private func updateCursor() {
+        if isActive {
+            guard !cursorPushed else { return }
+            (axis == .vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push()
+            cursorPushed = true
+        } else {
+            popCursorIfNeeded()
+        }
+    }
+
+    private func popCursorIfNeeded() {
+        guard cursorPushed else { return }
+        NSCursor.pop()
+        cursorPushed = false
     }
 
     private static func clamped(_ value: CGFloat, available: CGFloat, minPaneSize: CGFloat) -> CGFloat {

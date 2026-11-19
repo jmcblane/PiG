@@ -272,19 +272,25 @@ struct GlowToggleStyle: ToggleStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 10) {
-            configuration.label
-            Spacer(minLength: 0)
-            Capsule()
-                .fill(configuration.isOn ? appTheme.brass : appTheme.line)
-                .frame(width: 30, height: 17)
-                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
-                    Circle().fill(.white).frame(width: 13, height: 13).padding(2)
-                }
-                .shadow(color: configuration.isOn ? appTheme.brass.opacity(0.4) : .clear, radius: 5)
-                .animation(.easeOut(duration: 0.12), value: configuration.isOn)
-                .onTapGesture { configuration.isOn.toggle() }
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack(spacing: 10) {
+                configuration.label
+                Spacer(minLength: 0)
+                Capsule()
+                    .fill(configuration.isOn ? appTheme.brass : appTheme.line)
+                    .frame(width: 30, height: 17)
+                    .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                        Circle().fill(.white).frame(width: 13, height: 13).padding(2)
+                    }
+                    .shadow(color: configuration.isOn ? appTheme.brass.opacity(0.4) : .clear, radius: 5)
+                    .animation(.easeOut(duration: 0.12), value: configuration.isOn)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
         .opacity(isEnabled ? 1 : 0.45)
     }
 }
@@ -430,6 +436,7 @@ struct GlowSection<Content: View>: View {
                     .padding(.horizontal, 4)
             }
             VStack(spacing: 0) { content }
+                .padding(.top, -1)
                 .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(appTheme.panel2.opacity(0.7)))
                 .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(appTheme.line, lineWidth: 1))

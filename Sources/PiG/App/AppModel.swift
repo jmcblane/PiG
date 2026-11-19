@@ -32,6 +32,7 @@ struct InboxDismissalUndo {
     let items: [(id: String, index: Int)]
     let selectedControllerID: String?
     let selectedHermesChatID: String?
+    let selectedACPChatID: String?
     let title: String
 }
 
@@ -67,6 +68,20 @@ final class AppModel: ObservableObject {
     @Published var hermesChats: [HermesChatRecord] = HermesChatStore.load()
     /// Hermes replies finished while their chat was not selected.
     @Published var hermesUnreadChatIDs: Set<String> = []
+    // Antigravity ACP (see AppModel+ACP.swift).
+    @Published var antigravityModels: [ModelInfo] = []
+    @Published var antigravityModes: [ACPModeInfo] = ACPModeInfo.antigravityDefaults
+    @Published var antigravityAgentVersion: String?
+    @Published var antigravityAuthRequired = false
+    @Published var isDiscoveringAntigravityModels = false
+    @Published var acpControllers: [String: ACPChatController] = [:]
+    @Published var acpChats: [ACPChatRecord] = ACPChatStore.load()
+    @Published var selectedACPChatID: String?
+    @Published var acpUnreadChatIDs: Set<String> = []
+    @Published var acpSessionsByProject: [String: [ACPSessionSummary]] = [:]
+    @Published var landingACPModeID: String = ACPDefaultModePreference.modeID {
+        didSet { ACPDefaultModePreference.modeID = landingACPModeID }
+    }
     @Published private(set) var pinnedResourceIDs: [String] = PinnedResourceStore.ids {
         didSet { PinnedResourceStore.save(pinnedResourceIDs) }
     }
@@ -186,6 +201,7 @@ final class AppModel: ObservableObject {
     var landingModelCatalogByProject: [String: [ModelInfo]] = [:]
     var landingModelCatalogLoadingPaths: Set<String> = []
     var landingModelCatalogGeneration = 0
+    var acpSessionLoadingPaths: Set<String> = []
     var projectTrustTasks: [String: Task<Void, Error>] = [:]
     var usageLimitTask: Task<Void, Never>?
     var usageLimitActivationObserver: NSObjectProtocol?
@@ -202,7 +218,7 @@ final class AppModel: ObservableObject {
     }
 
     var activeComposerController: SessionController? {
-        selectedController ?? (selectedControllerID == nil ? landingDraftController : nil)
+        selectedController ?? (selectedControllerID == nil && selectedACPChatID == nil ? landingDraftController : nil)
     }
 
     var extensionPromptController: SessionController? {
@@ -257,6 +273,7 @@ final class AppModel: ObservableObject {
     }
 
     init() {
+        loadCachedAntigravityCatalog()
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
@@ -280,6 +297,7 @@ final class AppModel: ObservableObject {
             )
             await self.loadPersistedInboxSummaries()
             self.refreshSessions()
+            self.refreshAntigravityCatalog()
 
             async let customActions: Void = self.loadCustomActions()
             async let namingModels: Void = self.loadSessionNamingModels()

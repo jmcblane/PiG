@@ -579,55 +579,72 @@ struct FileTreeView: View {
         let confirmTitle: String
         if case .rename = action { confirmTitle = "Rename" } else { confirmTitle = "Create" }
         let tree = model
+        let appModel = appModel
         let request = GlowDialogRequest(
             title: title,
-            textInput: .init(placeholder: "Name", initialText: initialText, requiresText: false),
+            textInput: .init(placeholder: "Name", initialText: initialText, requiresText: true),
             confirmTitle: confirmTitle,
-            onConfirm: { name in Self.performNaming(action, name: name, tree: tree) }
+            onConfirm: { name in Self.performNaming(action, name: name, tree: tree, appModel: appModel) }
         )
-        let appModel = appModel
         dismiss()
         DispatchQueue.main.async { appModel.dialog = request }
     }
 
-    @MainActor private static func performNaming(_ action: NamingAction, name rawName: String, tree model: FileTreeModel) {
+    @MainActor private static func performNaming(_ action: NamingAction, name rawName: String, tree model: FileTreeModel, appModel: AppModel) {
         let name = rawName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, !name.contains("/") else {
+        guard !name.isEmpty else {
             NSSound.beep()
+            appModel.statusLine = "Name cannot be empty."
+            return
+        }
+        guard !name.contains("/") else {
+            NSSound.beep()
+            appModel.statusLine = "Name cannot contain “/”."
             return
         }
 
         Task {
-            let target = await Task.detached(priority: .userInitiated) { () -> URL? in
+            let result = await Task.detached(priority: .userInitiated) { () -> Result<URL, Error> in
                 let fm = FileManager.default
                 do {
                     switch action {
                     case .newFile(let dir):
                         let target = dir.appendingPathComponent(name)
-                        guard !fm.fileExists(atPath: target.path),
-                              fm.createFile(atPath: target.path, contents: Data()) else { return nil }
-                        return target
+                        guard !fm.fileExists(atPath: target.path) else {
+                            return .failure(NSError(domain: "PiG.FileTree", code: 1, userInfo: [NSLocalizedDescriptionKey: "“\(name)” already exists."]))
+                        }
+                        guard fm.createFile(atPath: target.path, contents: Data()) else {
+                            return .failure(NSError(domain: "PiG.FileTree", code: 2, userInfo: [NSLocalizedDescriptionKey: "Couldn’t create “\(name)”."]))
+                        }
+                        return .success(target)
                     case .newFolder(let dir):
                         let target = dir.appendingPathComponent(name, isDirectory: true)
-                        guard !fm.fileExists(atPath: target.path) else { return nil }
+                        guard !fm.fileExists(atPath: target.path) else {
+                            return .failure(NSError(domain: "PiG.FileTree", code: 1, userInfo: [NSLocalizedDescriptionKey: "“\(name)” already exists."]))
+                        }
                         try fm.createDirectory(at: target, withIntermediateDirectories: false)
-                        return target
+                        return .success(target)
                     case .rename(let url):
                         let target = url.deletingLastPathComponent().appendingPathComponent(name)
-                        guard target.path != url.path else { return url }
+                        guard target.path != url.path else { return .success(url) }
+                        guard !fm.fileExists(atPath: target.path) else {
+                            return .failure(NSError(domain: "PiG.FileTree", code: 1, userInfo: [NSLocalizedDescriptionKey: "“\(name)” already exists."]))
+                        }
                         try fm.moveItem(at: url, to: target)
-                        return target
+                        return .success(target)
                     }
                 } catch {
-                    return nil
+                    return .failure(error)
                 }
             }.value
-            guard let target else {
+            switch result {
+            case .success(let target):
+                model.revealInTree(target)
+                model.refreshAll()
+            case .failure(let error):
                 NSSound.beep()
-                return
+                appModel.statusLine = error.localizedDescription
             }
-            model.revealInTree(target)
-            model.refreshAll()
         }
     }
 }

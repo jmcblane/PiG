@@ -129,7 +129,10 @@ struct ModelInfo: Identifiable, Hashable {
     var thinkingLevels: [String]
     var contextWindow: Int?
 
-    var displayName: String { "\(provider)/\(name.isEmpty ? modelId : name)" }
+    var displayName: String {
+        let label = provider == ACPProvider.antigravity ? ACPProvider.antigravityDisplayName : provider
+        return "\(label)/\(name.isEmpty ? modelId : name)"
+    }
 
     static func from(_ dict: [String: Any]) -> ModelInfo? {
         guard let modelId = dict["id"] as? String,
@@ -451,7 +454,9 @@ enum EnabledModelScope {
     /// when no scope applies.
     static func scopedModels(_ models: [ModelInfo], projectPath: String?) -> [ModelInfo] {
         guard let patterns = patterns(projectPath: projectPath) else { return models }
-        return filter(models, patterns: patterns)
+        let acpModels = models.filter(\.isAntigravityACP)
+        let piModels = models.filter { !$0.isAntigravityACP }
+        return filter(piModels, patterns: patterns) + acpModels
     }
 
     /// pi's `resolveModelScopeFromModels`: pattern order, duplicates removed.
@@ -751,10 +756,16 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
     var userLabel: String? = nil
     // Set for tools run as jobs by the `background` extension tool.
     var backgroundJob: BackgroundJobInfo? = nil
+    // Set for ACP tool calls that report a human-readable title and standard ACP kind.
+    var acpTitle: String? = nil
+    var acpKind: String? = nil
 
     var summary: String { displayTitle }
 
     var displayTitle: String {
+        if let acpTitle = acpTitle?.nonEmptyTrimmed {
+            return acpTitle.oneLine(max: 160)
+        }
         let tool = shortName
         guard let args = jsonObject(arguments) else {
             let label = Self.builtinTools.contains(tool) ? tool.capitalized : tool
@@ -785,6 +796,10 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
     }
 
     func rowTitle(projectPath: String?) -> ToolRowTitle {
+        if let acpTitle = acpTitle?.nonEmptyTrimmed {
+            let cleaned = Self.replaceProjectPrefix(in: acpTitle, projectPath: projectPath).oneLine(max: 160)
+            return ToolRowTitle(verb: cleaned, subject: "")
+        }
         let tool = shortName
         guard let args = jsonObject(arguments) else {
             let label = Self.builtinTools.contains(tool) ? tool.capitalized : tool
@@ -821,7 +836,28 @@ struct ToolDisplay: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
-    var rowSymbolName: String { Self.symbolName(forTool: shortName) }
+    var rowSymbolName: String {
+        if let acpKind = acpKind?.lowercased() {
+            switch acpKind {
+            case "read": return "doc.text"
+            case "edit": return "pencil"
+            case "delete": return "trash"
+            case "move": return "arrow.right.doc.on.clipboard"
+            case "search": return "magnifyingglass"
+            case "execute": return "terminal"
+            case "think": return "sparkles"
+            case "fetch": return "globe"
+            default: break
+            }
+        }
+        return Self.symbolName(forTool: shortName)
+    }
+
+    private static func replaceProjectPrefix(in text: String, projectPath: String?) -> String {
+        guard let projectPath, !projectPath.isEmpty else { return text }
+        let root = projectPath.hasSuffix("/") ? projectPath : projectPath + "/"
+        return text.replacingOccurrences(of: root, with: "")
+    }
 
     static func symbolName(forTool name: String) -> String {
         switch name {

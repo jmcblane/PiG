@@ -32,7 +32,8 @@ struct RootView: View {
 
                 if !inboxVisible {
                     InboxRail(windowSize: size)
-                        .frame(height: size.height)
+                        .frame(height: size.height - CastBar.height)
+                        .padding(.top, CastBar.height)
                         .transition(.opacity)
                 }
 
@@ -146,6 +147,51 @@ private struct UnifiedGlobalToast: View {
             if let controller = model.selectedController {
                 ChatAwareToastBranch(controller: controller, dismissedStatus: $dismissedStatus)
                     .id(controller.id)
+            } else if let acp = model.selectedACPController {
+                ACPChatToastBranch(controller: acp, dismissedStatus: $dismissedStatus)
+                    .id(acp.id)
+            } else {
+                ExtensionOrStatusToast(statusCenter: model.statusCenter, dismissedStatus: $dismissedStatus)
+            }
+        }
+    }
+}
+
+private struct ACPChatToastBranch: View {
+    @Environment(\.appTheme) private var appTheme
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject var controller: ACPChatController
+    @Binding var dismissedStatus: String?
+
+    private var visibleError: String? {
+        guard let error = controller.errorText, !error.isEmpty else { return nil }
+        if controller.dismissedErrorToast == error { return nil }
+        return error
+    }
+
+    var body: some View {
+        Group {
+            if let error = visibleError {
+                AutoDismissToast(
+                    id: "acp-error-\(controller.id)-\(error)",
+                    accent: appTheme.danger,
+                    duration: 5,
+                    dismiss: { controller.dismissedErrorToast = error }
+                ) {
+                    Text(error)
+                        .font(AppFonts.ui(13))
+                        .foregroundStyle(appTheme.text)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .help(error)
+                        .contextMenu {
+                            Button("Copy Error") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(error, forType: .string)
+                            }
+                        }
+                }
             } else {
                 ExtensionOrStatusToast(statusCenter: model.statusCenter, dismissedStatus: $dismissedStatus)
             }
@@ -238,6 +284,7 @@ private struct ExtensionOrStatusToast: View {
 
 /// Shown when a newer PiG release exists on GitHub; opens its release page.
 struct AppUpdateButton: View {
+    @Environment(\.appTheme) private var appTheme
     @ObservedObject var updates: AppUpdateChecker
 
     var body: some View {
@@ -247,7 +294,7 @@ struct AppUpdateButton: View {
                     .frame(width: 26, height: 28)
                     .contentShape(Rectangle())
             }
-            .foregroundStyle(Color.blue)
+            .foregroundStyle(appTheme.brass)
             .help("PiG \(release.version) is available — click to download")
             .accessibilityLabel("Download PiG \(release.version)")
             .contextMenu {
@@ -263,6 +310,7 @@ struct AppUpdateButton: View {
 /// the update actions live. When only the installed notice remains (nothing
 /// to download), it shows an info icon that opens the changelog instead.
 struct PiUpdateButton: View {
+    @Environment(\.appTheme) private var appTheme
     @EnvironmentObject private var model: AppModel
     @ObservedObject var maintenance: PiMaintenanceController
 
@@ -278,7 +326,7 @@ struct PiUpdateButton: View {
                     .frame(width: 26, height: 28)
                     .contentShape(Rectangle())
             }
-            .foregroundStyle(hasPiRelease ? Color.orange : Color.green)
+            .foregroundStyle(hasPiRelease ? appTheme.warning : appTheme.good)
             .help(helpText)
             .accessibilityLabel("Review available updates")
             .contextMenu {
@@ -295,7 +343,7 @@ struct PiUpdateButton: View {
                     .frame(width: 26, height: 28)
                     .contentShape(Rectangle())
             }
-            .foregroundStyle(Color.green)
+            .foregroundStyle(appTheme.good)
             .help("Updated to Pi \(version) — click to see what’s new")
             .accessibilityLabel("See what’s new in Pi \(version)")
             .contextMenu {

@@ -17,7 +17,7 @@ struct SessionTreePopoverAnchor: View {
                     if let controller = model.selectedController {
                         SessionTreeLensView(controller: controller)
                             .environmentObject(model)
-                            .environment(\.appTheme, AppTheme(choice: model.selectedTheme))
+                            .environment(\.appTheme, AppTheme(choice: model.selectedTheme, textStyle: model.textStyle))
                     }
                 }
                 .glowPresentationBackground()

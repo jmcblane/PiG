@@ -137,7 +137,7 @@ private struct SettingsWindowChrome: NSViewRepresentable {
         private static func apply(to window: NSWindow) {
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
-            window.styleMask.insert(.fullSizeContentView)
+            window.styleMask.insert([.fullSizeContentView, .resizable])
         }
     }
 }

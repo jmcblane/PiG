@@ -113,7 +113,7 @@ enum TitleGenerationExtensionsPreference {
 enum SessionInboxStore {
     private static let key = "PiG.sidebar.sessionInbox"
     private static func isPersistent(_ id: String) -> Bool {
-        id.hasPrefix("session:") || id.hasPrefix("hermes:")
+        id.hasPrefix("session:") || id.hasPrefix("hermes:") || id.hasPrefix("acp:")
     }
 
     static var ids: [String] {

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ModelsSettingsView: View {
     @EnvironmentObject private var model: AppModel
@@ -9,6 +10,8 @@ struct ModelsSettingsView: View {
     @AppStorage(QuickModelSlots.key(4)) private var quickModel4 = ""
     @AppStorage(QuickModelSlots.key(5)) private var quickModel5 = ""
     @AppStorage(TitleGenerationExtensionsPreference.key) private var titleExtensions = ""
+    @State private var agyExecutablePath = AntigravityExecutablePreference.path ?? ""
+    @State private var detectedAgyPath = ACPPaths.detectedAntigravityExecutable.path
     @FocusState private var titleExtensionsFocused: Bool
 
     private let weekdays = [
@@ -21,9 +24,14 @@ struct ModelsSettingsView: View {
             VStack(spacing: 18) {
                 newSessionsSection
                 quickModelsSection
+                antigravitySection
                 sessionNamingSection
             }
             .padding(20)
+        }
+        .task {
+            _ = await PiEnvironment.mergedAsync()
+            detectedAgyPath = ACPPaths.detectedAntigravityExecutable.path
         }
     }
 
@@ -38,9 +46,12 @@ struct ModelsSettingsView: View {
                     ModelSelectionControl(
                         title: "Model",
                         selection: $model.singleSessionModelID,
-                        models: model.sessionNamingModels,
+                        models: model.selectableNewChatModels,
                         loadState: model.modelCatalogLoadState,
-                        retry: model.reloadModelCatalog,
+                        retry: {
+                            model.reloadModelCatalog()
+                            model.refreshAntigravityCatalog()
+                        },
                         allowsEmptySelection: true,
                         emptyLabel: "Pi default",
                         clearLabel: "Use pi default"
@@ -82,9 +93,12 @@ struct ModelsSettingsView: View {
             ModelSelectionControl(
                 title: "Work model",
                 selection: $model.scheduledWorkModelID,
-                models: model.sessionNamingModels,
+                models: model.selectableNewChatModels,
                 loadState: model.modelCatalogLoadState,
-                retry: model.reloadModelCatalog,
+                retry: {
+                    model.reloadModelCatalog()
+                    model.refreshAntigravityCatalog()
+                },
                 allowsEmptySelection: true,
                 emptyLabel: "Pi default",
                 clearLabel: "Use pi default"
@@ -94,9 +108,12 @@ struct ModelsSettingsView: View {
             ModelSelectionControl(
                 title: "Off-hours model",
                 selection: $model.scheduledOffHoursModelID,
-                models: model.sessionNamingModels,
+                models: model.selectableNewChatModels,
                 loadState: model.modelCatalogLoadState,
-                retry: model.reloadModelCatalog,
+                retry: {
+                    model.reloadModelCatalog()
+                    model.refreshAntigravityCatalog()
+                },
                 allowsEmptySelection: true,
                 emptyLabel: "Pi default",
                 clearLabel: "Use pi default"
@@ -107,10 +124,10 @@ struct ModelsSettingsView: View {
             GlowBlockRow {
                 Label("Choose at least one work day and an end time after the start time.", systemImage: "exclamationmark.triangle.fill")
                     .font(AppFonts.ui(12))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(appTheme.warning)
             }
         } else {
-            ScheduleStatus(models: model.sessionNamingModels)
+            ScheduleStatus(models: model.selectableNewChatModels)
         }
     }
 
@@ -121,12 +138,166 @@ struct ModelsSettingsView: View {
                     ModelSelectionControl(
                         title: "⌘\(slot)",
                         selection: quickModelBinding(slot),
-                        models: model.sessionNamingModels,
+                        models: model.selectableNewChatModels,
                         loadState: model.modelCatalogLoadState,
-                        retry: model.reloadModelCatalog,
+                        retry: {
+                            model.reloadModelCatalog()
+                            model.refreshAntigravityCatalog()
+                        },
                         allowsEmptySelection: true
                     )
                 }
+            }
+        }
+    }
+
+    private var antigravitySection: some View {
+        GlowSection(
+            "Antigravity (ACP)",
+            footer: "Uses the official unmodified `agy acp` protocol server. Selecting an Antigravity model on a new chat routes that chat directly to Antigravity."
+        ) {
+            GlowBlockRow {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(antigravityTitle)
+                            .font(AppFonts.ui(13))
+                            .foregroundStyle(appTheme.text)
+                        Text(antigravityStatusLine)
+                            .font(AppFonts.ui(11.5))
+                            .foregroundStyle(antigravityStatusColor)
+                    }
+                    Spacer(minLength: 8)
+                    Button("Log in…") {
+                        model.openAntigravityLoginInTerminal()
+                    }
+                    .buttonStyle(GlowButtonStyle())
+                    .disabled(!ACPPaths.isAntigravityInstalled)
+                    Button {
+                        model.refreshAntigravityCatalog()
+                    } label: {
+                        if model.isDiscoveringAntigravityModels {
+                            Text("Refreshing…")
+                        } else {
+                            Text("Refresh Models")
+                        }
+                    }
+                    .buttonStyle(GlowButtonStyle())
+                    .disabled(model.isDiscoveringAntigravityModels || !ACPPaths.isAntigravityInstalled)
+                }
+            }
+
+            if !model.antigravityModes.isEmpty {
+                GlowRow("Default mode", subtitle: "Approval behavior for newly started Antigravity chats.") {
+                    GlowDropdown(
+                        selection: $model.landingACPModeID,
+                        options: model.antigravityModes.map(\.id),
+                        label: { id in model.antigravityModes.first(where: { $0.id == id })?.name ?? id }
+                    )
+                }
+            }
+
+            GlowBlockRow {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Executable override")
+                        .font(AppFonts.ui(13))
+                        .foregroundStyle(appTheme.text)
+                    GlowTextField(detectedAgyPathLabel, text: $agyExecutablePath, monospaced: true)
+                        .onChange(of: agyExecutablePath) { _, value in
+                            AntigravityExecutablePreference.path = value
+                            detectedAgyPath = ACPPaths.detectedAntigravityExecutable.path
+                            model.refreshAntigravityCatalog()
+                        }
+                }
+            }
+
+            GlowBlockRow {
+                HStack(spacing: 8) {
+                    agyExecutableStatus
+                    Spacer()
+                    Button("Choose…") { chooseAgyExecutable() }
+                        .buttonStyle(GlowButtonStyle())
+                    Button("Clear") { agyExecutablePath = "" }
+                        .buttonStyle(GlowButtonStyle())
+                        .disabled(agyExecutablePath.isEmpty)
+                }
+            }
+        }
+    }
+
+    private var detectedAgyPathLabel: String {
+        detectedAgyPath == "/usr/bin/env" ? "agy not found on PATH" : detectedAgyPath
+    }
+
+    private var antigravityTitle: String {
+        if let version = model.antigravityAgentVersion, !version.isEmpty {
+            return "Antigravity \(version)"
+        }
+        return "Antigravity"
+    }
+
+    private var antigravityStatusLine: String {
+        if !ACPPaths.isAntigravityInstalled {
+            return "Antigravity CLI (`agy`) not found."
+        }
+        if model.antigravityAuthRequired {
+            return "Sign-in required. Click Log in… to run `agy acp --login`."
+        }
+        if model.isDiscoveringAntigravityModels {
+            return "Discovering available models via ACP…"
+        }
+        let count = model.antigravityModels.count
+        if count > 0 {
+            return "\(count) model\(count == 1 ? "" : "s") available in the model picker."
+        }
+        return "Ready. Click Refresh Models to discover available models."
+    }
+
+    private var antigravityStatusColor: Color {
+        if !ACPPaths.isAntigravityInstalled || model.antigravityAuthRequired {
+            return appTheme.warning
+        }
+        if !model.antigravityModels.isEmpty {
+            return appTheme.palette.good.color
+        }
+        return appTheme.muted
+    }
+
+    @ViewBuilder
+    private var agyExecutableStatus: some View {
+        if let path = agyExecutablePath.nonEmptyTrimmed {
+            if FileManager.default.isExecutableFile(atPath: (path as NSString).expandingTildeInPath) {
+                Label("Executable found", systemImage: "checkmark.circle")
+                    .font(AppFonts.ui(12))
+                    .foregroundStyle(appTheme.muted)
+            } else {
+                Label("Not found or not executable", systemImage: "exclamationmark.triangle.fill")
+                    .font(AppFonts.ui(12))
+                    .foregroundStyle(appTheme.warning)
+            }
+        } else if detectedAgyPath != "/usr/bin/env" {
+            Label("Using auto-detected agy", systemImage: "magnifyingglass")
+                .font(AppFonts.ui(12))
+                .foregroundStyle(appTheme.muted)
+        } else {
+            Label("agy not detected", systemImage: "exclamationmark.triangle.fill")
+                .font(AppFonts.ui(12))
+                .foregroundStyle(appTheme.warning)
+        }
+    }
+
+    private func chooseAgyExecutable() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.treatsFilePackagesAsDirectories = true
+        panel.showsHiddenFiles = true
+        let current = agyExecutablePath.nonEmptyTrimmed.map { ($0 as NSString).expandingTildeInPath }
+            ?? (detectedAgyPath == "/usr/bin/env" ? "/usr/local/bin" : detectedAgyPath)
+        panel.directoryURL = URL(fileURLWithPath: current).deletingLastPathComponent()
+        panel.prompt = "Choose"
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                agyExecutablePath = url.path
             }
         }
     }
@@ -164,7 +335,7 @@ struct ModelsSettingsView: View {
                     GlowBlockRow {
                         Label(status.message, systemImage: status.isReady ? "checkmark.circle" : "exclamationmark.triangle.fill")
                             .font(AppFonts.ui(11.5))
-                            .foregroundStyle(status.isReady ? appTheme.muted : Color.orange)
+                            .foregroundStyle(status.isReady ? appTheme.muted : appTheme.warning)
                     }
                 } else {
                     GlowRow("Naming thinking") {
@@ -199,7 +370,7 @@ struct ModelsSettingsView: View {
             ForEach(missingTitleExtensionPaths, id: \.self) { path in
                 Label("Not found, will be skipped: \(path)", systemImage: "exclamationmark.triangle.fill")
                     .font(AppFonts.ui(11.5))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(appTheme.warning)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -420,11 +591,11 @@ struct ModelSelectionControl: View {
             if selection.isEmpty && !allowsEmptySelection {
                 Label("Choose a model.", systemImage: "exclamationmark.triangle.fill")
                     .font(AppFonts.ui(11.5))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(appTheme.warning)
             } else if !selection.isEmpty && selectedModel == nil && loadState != .loading {
                 Label("Saved model is unavailable. It will not be replaced automatically.", systemImage: "exclamationmark.triangle.fill")
                     .font(AppFonts.ui(11.5))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(appTheme.warning)
             }
         }
     }
@@ -441,7 +612,7 @@ struct ModelSelectionControl: View {
                         .foregroundStyle(appTheme.text)
                         .lineLimit(1)
                     if let selectedModel {
-                        Text("\(selectedModel.provider)/\(selectedModel.modelId)")
+                        Text("\(providerDisplayLabel(selectedModel.provider))/\(selectedModel.modelId)")
                             .font(AppFonts.ui(10.5))
                             .foregroundStyle(appTheme.muted)
                             .lineLimit(1)
@@ -453,6 +624,10 @@ struct ModelSelectionControl: View {
         .popover(isPresented: $isPresented, arrowEdge: .trailing) {
             pickerContent
         }
+    }
+
+    private func providerDisplayLabel(_ provider: String) -> String {
+        provider == ACPProvider.antigravity ? ACPProvider.antigravityDisplayName : provider
     }
 
     private var pickerContent: some View {
@@ -525,7 +700,7 @@ struct ModelSelectionControl: View {
                         ForEach(pinned) { model in modelRow(model) }
                     }
                     ForEach(Dictionary(grouping: filteredModels.filter { !pinnedIDs.contains($0.id) }, by: \.provider).keys.sorted(), id: \.self) { provider in
-                        groupHeader(provider)
+                        groupHeader(providerDisplayLabel(provider))
                         ForEach(filteredModels.filter { $0.provider == provider && !pinnedIDs.contains($0.id) }) { model in
                             modelRow(model)
                         }
@@ -554,7 +729,7 @@ struct ModelSelectionControl: View {
     }
 
     private func modelRow(_ model: ModelInfo) -> some View {
-        ModelPickerRow(
+        SettingsModelPickerRow(
             model: model,
             isSelected: selection == model.id,
             isPinned: pinnedIDs.contains(model.id),
@@ -571,7 +746,7 @@ struct ModelSelectionControl: View {
 }
 
 /// One row in the model picker popover: checkmark, name and id, and a pin star.
-private struct ModelPickerRow: View {
+private struct SettingsModelPickerRow: View {
     @Environment(\.appTheme) private var appTheme
     let model: ModelInfo
     let isSelected: Bool
@@ -579,6 +754,10 @@ private struct ModelPickerRow: View {
     let select: () -> Void
     let togglePin: () -> Void
     @State private var hovering = false
+
+    private var providerLabel: String {
+        model.provider == ACPProvider.antigravity ? ACPProvider.antigravityDisplayName : model.provider
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -593,7 +772,7 @@ private struct ModelPickerRow: View {
                         Text(model.name)
                             .font(AppFonts.ui(12.5, weight: isSelected ? .semibold : .regular))
                             .foregroundStyle(appTheme.text)
-                        Text("\(model.provider)/\(model.modelId)")
+                        Text("\(providerLabel)/\(model.modelId)")
                             .font(AppFonts.ui(11))
                             .foregroundStyle(appTheme.muted)
                     }

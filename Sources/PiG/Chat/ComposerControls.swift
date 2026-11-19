@@ -10,9 +10,16 @@ struct ComposerToolbar: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
-            ModelPickerMenu(controller: controller, value: selectedModelName, provider: selectedModel?.provider)
-                .help("Model (⌘1–⌘5)")
+            ModelPickerMenu(controller: controller, value: selectedModelName, provider: selectedModelProviderLabel)
+                .help(selectedModelProviderLabel.map { "\($0) · Model (⌘1–⌘5)" } ?? "Model (⌘1–⌘5)")
             ThinkingDial(controller: controller)
+            if selectedModel?.isAntigravityACP == true {
+                ACPModePicker(
+                    modes: model.antigravityModes,
+                    selectedModeID: model.landingACPModeID,
+                    onSelect: { model.landingACPModeID = $0 }
+                )
+            }
             Spacer(minLength: 8)
             ContextRingButton(controller: controller)
             if let usageProvider {
@@ -42,6 +49,11 @@ struct ComposerToolbar: View {
 
     private var selectedModel: ModelInfo? {
         controller.models.first(where: { $0.id == controller.selectedModelID })
+    }
+
+    private var selectedModelProviderLabel: String? {
+        guard let provider = selectedModel?.provider else { return nil }
+        return provider == ACPProvider.antigravity ? ACPProvider.antigravityDisplayName : provider
     }
 
     private var selectedModelName: String {
@@ -253,7 +265,7 @@ struct TabStripPickerLabel: View {
     @Environment(\.appTheme) private var appTheme
     let value: String
     let hovering: Bool
-    /// When set, shows a provider color dot and reveals the provider name on hover.
+    /// When set, shows a provider color dot.
     var provider: String?
 
     var body: some View {
@@ -263,20 +275,11 @@ struct TabStripPickerLabel: View {
                     .fill(Self.color(for: provider))
                     .frame(width: 7, height: 7)
             }
-            HStack(spacing: 0) {
-                if hovering, let provider {
-                    Text("\(provider) / ")
-                        .foregroundStyle(appTheme.muted)
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
-                }
-                Text(value)
-                    .foregroundStyle(hovering ? appTheme.text : appTheme.secondaryText)
-            }
-            .font(AppFonts.ui(11.5, weight: .medium))
-            .lineLimit(1)
-            .clipped()
+            Text(value)
+                .foregroundStyle(hovering ? appTheme.text : appTheme.secondaryText)
+                .font(AppFonts.ui(11.5, weight: .medium))
+                .lineLimit(1)
         }
-        .animation(.easeOut(duration: 0.18), value: hovering)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .contentShape(Rectangle())
@@ -289,7 +292,7 @@ struct TabStripPickerLabel: View {
     }
 }
 
-private struct ModelPickerRow: View {
+struct ModelPickerRow: View {
     @Environment(\.appTheme) private var appTheme
     let model: ModelInfo
     let isSelected: Bool

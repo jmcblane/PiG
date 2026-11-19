@@ -63,7 +63,10 @@ struct ExtensionUIPromptView: View {
     @ObservedObject var controller: SessionController
     let prompt: ExtensionUIPrompt
     @State private var value: String
+    @State private var selectedOptionIndex = 0
+    @State private var hoveredOptionIndex: Int?
     @FocusState private var fieldFocused: Bool
+    @FocusState private var selectFocused: Bool
 
     init(controller: SessionController, prompt: ExtensionUIPrompt) {
         self.controller = controller
@@ -86,35 +89,77 @@ struct ExtensionUIPromptView: View {
 
             switch prompt.kind {
             case .select(let options):
-                VStack(spacing: 1) {
-                    ForEach(options, id: \.self) { option in
-                        Button {
-                            controller.respondToExtensionPrompt(prompt.id, value: option)
-                        } label: {
-                            HStack(spacing: 10) {
-                                Text(option)
-                                    .font(AppFonts.ui(14))
-                                    .foregroundStyle(appTheme.text)
-                                    .multilineTextAlignment(.leading)
-                                Spacer(minLength: 8)
-                                Image(systemName: "arrow.right")
-                                    .font(AppFonts.ui(11, weight: .semibold))
-                                    .foregroundStyle(appTheme.muted)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 1) {
+                            ForEach(Array(options.enumerated()), id: \.offset) { index, option in
+                                let isActive = index == selectedOptionIndex || index == hoveredOptionIndex
+                                Button {
+                                    controller.respondToExtensionPrompt(prompt.id, value: option)
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Text(option)
+                                            .font(AppFonts.ui(14, weight: index == selectedOptionIndex ? .medium : .regular))
+                                            .foregroundStyle(appTheme.text)
+                                            .multilineTextAlignment(.leading)
+                                        Spacer(minLength: 8)
+                                        Image(systemName: "arrow.right")
+                                            .font(AppFonts.ui(11, weight: .semibold))
+                                            .foregroundStyle(isActive ? appTheme.brass : appTheme.muted)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        index == selectedOptionIndex
+                                            ? appTheme.brass.opacity(0.16)
+                                            : (isActive ? appTheme.panel2 : appTheme.panel2.opacity(0.65))
+                                    )
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .id(index)
+                                .onHover { over in
+                                    if over {
+                                        hoveredOptionIndex = index
+                                        selectedOptionIndex = index
+                                    } else if hoveredOptionIndex == index {
+                                        hoveredOptionIndex = nil
+                                    }
+                                }
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                        .background(appTheme.panel2.opacity(0.72))
+                    }
+                    .frame(maxHeight: 280)
+                    .fixedSize(horizontal: false, vertical: options.count <= 6)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(appTheme.line, lineWidth: 1))
+                    .focusable()
+                    .focused($selectFocused)
+                    .focusEffectDisabled()
+                    .onKeyPress(.upArrow) {
+                        guard !options.isEmpty else { return .ignored }
+                        selectedOptionIndex = (selectedOptionIndex - 1 + options.count) % options.count
+                        proxy.scrollTo(selectedOptionIndex)
+                        return .handled
+                    }
+                    .onKeyPress(.downArrow) {
+                        guard !options.isEmpty else { return .ignored }
+                        selectedOptionIndex = (selectedOptionIndex + 1) % options.count
+                        proxy.scrollTo(selectedOptionIndex)
+                        return .handled
+                    }
+                    .onKeyPress(.return) {
+                        guard options.indices.contains(selectedOptionIndex) else { return .ignored }
+                        controller.respondToExtensionPrompt(prompt.id, value: options[selectedOptionIndex])
+                        return .handled
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 HStack {
                     Spacer()
                     Button("Cancel") { controller.cancelExtensionPrompt(prompt.id) }
                         .keyboardShortcut(.cancelAction)
-                        .buttonStyle(ExtensionPromptButtonStyle())
+                        .buttonStyle(GlowButtonStyle(kind: .secondary))
                 }
 
             case .confirm(let message):
@@ -154,10 +199,9 @@ struct ExtensionUIPromptView: View {
         }
         .padding(20)
         .frame(width: 520)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(appTheme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(appTheme.brass.opacity(0.5), lineWidth: 1))
-        .shadow(color: Color.black.opacity(0.42), radius: 30, y: 12)
+        .glowPanel(cornerRadius: 14)
         .onAppear {
+            if case .select = prompt.kind { selectFocused = true }
             if case .input = prompt.kind { fieldFocused = true }
             if case .editor = prompt.kind { fieldFocused = true }
         }
@@ -176,6 +220,7 @@ struct ExtensionUIPromptView: View {
                 }
             }
             .keyboardShortcut(.cancelAction)
+            .buttonStyle(GlowButtonStyle(kind: .secondary))
             Button(confirm ? "Yes" : "Submit") {
                 if confirm {
                     controller.respondToExtensionConfirmation(prompt.id, confirmed: true)
@@ -184,8 +229,8 @@ struct ExtensionUIPromptView: View {
                 }
             }
             .keyboardShortcut(.defaultAction)
+            .buttonStyle(GlowButtonStyle(kind: .primary))
         }
-        .buttonStyle(ExtensionPromptButtonStyle())
     }
 
     private func submitValue() {
@@ -323,7 +368,7 @@ struct ExtensionNotificationsView: View {
     private func color(for kind: ExtensionUINotification.Kind) -> Color {
         switch kind {
         case .info: return appTheme.brass
-        case .warning: return .orange
+        case .warning: return appTheme.warning
         case .error: return appTheme.danger
         }
     }

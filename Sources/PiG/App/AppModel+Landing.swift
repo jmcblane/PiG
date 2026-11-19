@@ -5,6 +5,8 @@ extension AppModel {
     func showNewChatHome(projectPath: String? = nil, quickChat: Bool = false) {
         let currentNormalProjectPath = selectedController.flatMap {
             $0.isQuickChat ? nil : $0.projectPath
+        } ?? selectedACPController.flatMap {
+            $0.isQuickChat ? nil : $0.projectPath
         }
         let targetPath = projectPath ?? currentNormalProjectPath ?? selectedProjectPath.flatMap { path in
             isQuickChatsProject(path) ? nil : path
@@ -31,6 +33,7 @@ extension AppModel {
 
         clearAgentSelection()
         selectedControllerID = nil
+        selectedACPChatID = nil
         composingQuickChat = quickChat
         selectedProjectPath = quickChat ? PiPaths.quickChatsProject.path : targetPath
         if let targetPath, !quickChat { touchProject(targetPath) }
@@ -39,7 +42,7 @@ extension AppModel {
     }
 
     func prepareLandingDraft() {
-        guard selectedControllerID == nil, let selectedProjectPath else { return }
+        guard selectedControllerID == nil, selectedACPChatID == nil, let selectedProjectPath else { return }
         let landingAgent = selectedAgentID.flatMap(agent(withID:))
         let quickChat = landingAgent == nil && (composingQuickChat || isQuickChatsProject(selectedProjectPath))
         if let existing = landingDraftController,
@@ -72,7 +75,7 @@ extension AppModel {
                 previous?.id == pending.controllerID ? (controller.id, pending.modelID) : nil
             }
         let initialModels = landingModelCatalogByProject[selectedProjectPath] ?? sessionNamingModels
-        if !initialModels.isEmpty {
+        if !initialModels.isEmpty || (landingAgent == nil && !antigravityModels.isEmpty) {
             applyLandingModels(initialModels, to: controller)
         }
         landingDraftController = controller
@@ -189,6 +192,10 @@ extension AppModel {
 
     func applyLandingModels(_ models: [ModelInfo], to controller: SessionController) {
         var scoped = EnabledModelScope.scopedModels(models, projectPath: controller.projectPath)
+        if controller.agentID == nil, !antigravityModels.isEmpty {
+            let existingIDs = Set(scoped.map(\.id))
+            scoped.append(contentsOf: antigravityModels.filter { !existingIDs.contains($0.id) })
+        }
         if let preferredID = agent(for: controller)?.modelID,
            let preferred = models.first(where: { $0.id == preferredID }), !scoped.contains(where: { $0.id == preferredID }) {
             scoped.append(preferred)
@@ -196,7 +203,7 @@ extension AppModel {
         let currentSelection = controller.selectedModelID
         controller.models = scoped
         if let pending = pendingLandingModelSelection, pending.controllerID == controller.id,
-           landingModelCatalogByProject[controller.projectPath] != nil {
+           (landingModelCatalogByProject[controller.projectPath] != nil || ModelInfo.isAntigravityACP(id: pending.modelID)) {
             pendingLandingModelSelection = nil
             if controller.explicitModelSelectionID == nil,
                scoped.contains(where: { $0.id == pending.modelID }) {
@@ -215,7 +222,9 @@ extension AppModel {
     func activateLandingDraft(_ controller: SessionController) {
         guard landingDraftController?.id == controller.id else { return }
         clearAgentSelection()
+        selectedACPChatID = nil
         pendingLandingModelSelection = nil
+        controller.models.removeAll(where: \.isAntigravityACP)
         landingDraftText = ""
         landingDraftImages = []
         touchProject(controller.projectPath)
@@ -233,6 +242,7 @@ extension AppModel {
     /// Discard a landing draft, without stopping ordinary threads.
     func prepareAgentSelection() {
         clearAgentSelection()
+        selectedACPChatID = nil
         landingDraftController?.stopRPC()
         landingDraftController = nil
         composingQuickChat = false

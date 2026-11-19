@@ -5,6 +5,7 @@ extension AppModel {
     @discardableResult
     func newSession(projectPath: String, extensionPaths: [String] = [], initialMessage: String? = nil) -> SessionController {
         clearAgentSelection()
+        selectedACPChatID = nil
         landingDraftController?.stopRPC()
         landingDraftController = nil
         touchProject(projectPath)
@@ -47,6 +48,7 @@ extension AppModel {
 
     func newQuickChat(extensionPaths: [String] = [], initialMessage: String? = nil) {
         clearAgentSelection()
+        selectedACPChatID = nil
         landingDraftController?.stopRPC()
         landingDraftController = nil
         Task { [weak self] in
@@ -70,6 +72,7 @@ extension AppModel {
                 self?.handleControllerEvent(event)
             }
             self.clearAgentSelection()
+            self.selectedACPChatID = nil
             self.controllers[controller.id] = controller
             self.selectedProjectPath = projectPath
             self.composingQuickChat = false
@@ -87,6 +90,7 @@ extension AppModel {
 
     private func select(_ controller: SessionController) {
         clearAgentSelection()
+        selectedACPChatID = nil
         controller.resumeRuntimeLoading()
         touchProject(controller.projectPath)
         selectedProjectPath = controller.projectPath
@@ -133,6 +137,7 @@ extension AppModel {
 
     private func prepareToOpen(_ summary: SessionSummary) {
         clearAgentSelection()
+        selectedACPChatID = nil
         touchProject(summary.projectPath)
         selectedProjectPath = summary.projectPath
         composingQuickChat = false

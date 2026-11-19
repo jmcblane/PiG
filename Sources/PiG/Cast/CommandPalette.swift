@@ -274,10 +274,17 @@ struct CommandPalette: View {
 
     /// Model results read the composer's controller, which AppModel does not republish.
     private var controllerChanges: AnyPublisher<Void, Never> {
-        guard let controller = model.activeComposerController else { return Empty().eraseToAnyPublisher() }
-        return controller.objectWillChange
-            .throttle(for: .milliseconds(250), scheduler: RunLoop.main, latest: true)
-            .eraseToAnyPublisher()
+        if let controller = model.activeComposerController {
+            return controller.objectWillChange
+                .throttle(for: .milliseconds(250), scheduler: RunLoop.main, latest: true)
+                .eraseToAnyPublisher()
+        }
+        if let acp = model.selectedACPController {
+            return acp.objectWillChange
+                .throttle(for: .milliseconds(250), scheduler: RunLoop.main, latest: true)
+                .eraseToAnyPublisher()
+        }
+        return Empty().eraseToAnyPublisher()
     }
 
     // MARK: Results
@@ -337,7 +344,7 @@ struct CommandPalette: View {
         return sessionCache.filter { !open.contains($0.inboxKey) }
     }
 
-    /// Every known session and Hermes chat, newest first. Built once per palette and
+    /// Every known session, Antigravity chat, and Hermes chat, newest first. Built once per palette and
     /// again when the archive finishes loading, not on each keystroke.
     private func buildSessionItems() -> [PaletteItem] {
         var seen = Set<String>()
@@ -355,6 +362,36 @@ struct CommandPalette: View {
                 inboxKey: "chat:\(model.inboxID(forSessionPath: summary.filePath))"
             ) { model.selectSession(summary) }
         }
+        var seenACPSessionIDs = Set<String>()
+        let savedACP = model.acpChats
+            .sorted { $0.lastActivity > $1.lastActivity }
+            .map { chat -> PaletteItem in
+                if let sid = chat.sessionID { seenACPSessionIDs.insert(sid) }
+                let place = chat.isQuickChat ? "Quick chat" : model.projectDisplayName(for: chat.projectPath)
+                return PaletteItem(
+                    id: "acp:\(chat.id)", kind: .sessions,
+                    title: chat.title.isEmpty ? "Untitled" : chat.title,
+                    subtitle: "\(place) · \(ACPProvider.antigravityDisplayName), \(chat.lastActivity.formatted(.relative(presentation: .named)))",
+                    icon: .chat(model.chatIcon(for: chat)),
+                    keywords: "antigravity acp",
+                    inboxKey: "chat:acp:\(chat.id)"
+                ) { model.selectACPChat(chat.id) }
+            }
+        let discoveredACP = model.acpSessionsByProject.values
+            .flatMap { $0 }
+            .filter { seenACPSessionIDs.insert($0.sessionID).inserted }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .map { summary -> PaletteItem in
+                let isQuick = model.isQuickChatsProject(summary.cwd)
+                let place = isQuick ? "Quick chat" : model.projectDisplayName(for: summary.cwd)
+                return PaletteItem(
+                    id: "acp-session:\(summary.sessionID)", kind: .sessions,
+                    title: summary.title.isEmpty ? "Untitled" : summary.title,
+                    subtitle: "\(place) · \(ACPProvider.antigravityDisplayName), \(summary.updatedAt.formatted(.relative(presentation: .named)))",
+                    icon: .chat(isQuick ? .quickChat : .project(path: summary.cwd)),
+                    keywords: "antigravity acp"
+                ) { model.openACPSession(summary) }
+            }
         let hermes = model.hermesChats.map { chat in
             PaletteItem(
                 id: "hermes:\(chat.id)", kind: .sessions,
@@ -364,7 +401,7 @@ struct CommandPalette: View {
                 inboxKey: "chat:hermes:\(chat.id)"
             ) { model.selectHermesChat(agentID: chat.agentID, chatID: chat.id) }
         }
-        return sessions + hermes
+        return sessions + savedACP + discoveredACP + hermes
     }
 
     private func agentItems() -> [PaletteItem] {
@@ -415,16 +452,50 @@ struct CommandPalette: View {
 
     private func modelItems() -> [PaletteItem] {
         _ = controllerRevision
-        guard let controller = model.activeComposerController else { return [] }
         let quick = (1...5).map { UserDefaults.standard.string(forKey: QuickModelSlots.key($0)) ?? "" }
+        if let acp = model.selectedACPController {
+            let models = acp.models.map { info in
+                PaletteItem(
+                    id: "model:\(info.id)", kind: .models,
+                    title: info.name.isEmpty ? info.modelId : info.name,
+                    subtitle: ACPProvider.antigravityDisplayName,
+                    icon: .symbol("cpu"),
+                    checked: acp.selectedModelID == info.id,
+                    shortcut: quick.firstIndex(of: info.id).map { "⌘\($0 + 1)" },
+                    keywords: "antigravity"
+                ) { Task { await acp.setModel(info.id) } }
+            }
+            let levels = acp.availableThinkingLevels.map { level in
+                PaletteItem(
+                    id: "thinking:\(level)", kind: .models,
+                    title: "Thinking: \(level)",
+                    icon: .symbol("brain"),
+                    checked: acp.thinkingLevel == level,
+                    keywords: "reasoning effort"
+                ) { Task { await acp.setThinkingLevel(level) } }
+            }
+            let modes = acp.modes.map { mode in
+                PaletteItem(
+                    id: "acp-mode:\(mode.id)", kind: .models,
+                    title: "Mode: \(mode.name)",
+                    subtitle: mode.description ?? "",
+                    icon: .symbol("slider.horizontal.3"),
+                    checked: acp.currentModeID == mode.id,
+                    keywords: "antigravity approval mode"
+                ) { Task { await acp.setMode(mode.id) } }
+            }
+            return models + levels + modes
+        }
+        guard let controller = model.activeComposerController else { return [] }
         let models = controller.models.map { info in
             PaletteItem(
                 id: "model:\(info.id)", kind: .models,
                 title: info.name.isEmpty ? info.modelId : info.name,
-                subtitle: info.provider,
+                subtitle: info.provider == ACPProvider.antigravity ? ACPProvider.antigravityDisplayName : info.provider,
                 icon: .symbol("cpu"),
                 checked: controller.selectedModelID == info.id,
-                shortcut: quick.firstIndex(of: info.id).map { "⌘\($0 + 1)" }
+                shortcut: quick.firstIndex(of: info.id).map { "⌘\($0 + 1)" },
+                keywords: info.isAntigravityACP ? "antigravity acp" : ""
             ) { controller.setModel(info.id) }
         }
         let levels = controller.availableThinkingLevels.map { level in
@@ -448,7 +519,7 @@ struct CommandPalette: View {
             add("custom:\(action.id)", action.title, action.symbolName, keywords: action.command) { model.runCustomAction(action) }
         }
         add("new-chat", "New Chat", "square.and.pencil", shortcut: "⌘N") {
-            if let agent = model.selectedAgent { model.selectAgent(agent.id) } else { model.showNewChatHome() }
+            model.startNewChat()
         }
         add("new-quick-chat", "New Quick Chat", "bolt.fill", shortcut: "⇧⌘N") { model.showNewChatHome(quickChat: true) }
         if let controller = model.selectedController {
@@ -477,6 +548,10 @@ struct CommandPalette: View {
         add("refresh-sessions", "Refresh Chats", "arrow.triangle.2.circlepath", keywords: "rescan reload list") {
             model.refreshSessions()
             model.loadSessionArchive()
+            model.refreshAntigravityCatalog()
+            if let path = model.activeProjectPath {
+                model.refreshACPSessions(forProjectPath: path)
+            }
         }
         add("reload-idle", "Reload All Idle Chat Runtimes", "arrow.clockwise") { model.reloadAllIdleSessionRuntimes() }
         add("unload-idle", "Unload All Idle Chats", "moon.zzz") { model.unloadAllIdleSessions() }
@@ -613,6 +688,7 @@ extension AppModel {
     /// Project whose files the palette searches: the selected chat's project, else the selected project.
     var activeProjectPath: String? {
         if let controller = activeComposerController, !controller.isQuickChat { return controller.projectPath }
+        if let acp = selectedACPController, !acp.isQuickChat { return acp.projectPath }
         guard let path = selectedProjectPath, !isQuickChatsProject(path) else { return nil }
         return path
     }

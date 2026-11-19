@@ -81,7 +81,7 @@ struct ToolActivityView: View {
     let showThinkingTraces: Bool
     let highlightedMessageID: String?
     var htmlArtifacts: [String: HTMLArtifact] = [:]
-    var htmlActionTarget: SessionController? = nil
+    var htmlActionTarget: (any HTMLWidgetActionTarget)? = nil
     @State private var expanded = false
     @State private var hoveringSummary = false
 
@@ -251,7 +251,7 @@ struct ToolActivityView: View {
         var order: [ToolActivityKind] = []
         var counts: [ToolActivityKind: Int] = [:]
         for tool in group.tools {
-            let kind = ToolActivityKind(tool.shortName)
+            let kind = ToolActivityKind(tool: tool)
             if counts[kind] == nil { order.append(kind) }
             counts[kind, default: 0] += 1
         }
@@ -263,6 +263,19 @@ struct ToolActivityView: View {
 
 private enum ToolActivityKind: Hashable {
     case read, write, edit, command, search, subagent, script, background, other
+
+    init(tool: ToolDisplay) {
+        if let acpKind = tool.acpKind?.lowercased() {
+            switch acpKind {
+            case "read": self = .read; return
+            case "edit", "delete", "move": self = .edit; return
+            case "execute": self = .command; return
+            case "search", "fetch": self = .search; return
+            default: break
+            }
+        }
+        self.init(tool.shortName)
+    }
 
     init(_ shortName: String) {
         switch shortName {
