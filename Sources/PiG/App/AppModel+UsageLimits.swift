@@ -4,9 +4,10 @@ import AppKit
 
 extension AppModel {
     var selectedUsageLimitProvider: UsageLimitProvider? {
-        guard let controller = selectedController else { return nil }
-        let selectedModel = controller.models.first { $0.id == controller.selectedModelID }
-        return UsageLimitProvider.from(model: selectedModel)
+        if let controller = selectedController {
+            return UsageLimitProvider.from(model: controller.models.first { $0.id == controller.selectedModelID })
+        }
+        return selectedACPController.flatMap { UsageLimitProvider.from(model: $0.activeModel) }
     }
 
     func usageLimit(for provider: UsageLimitProvider?) -> UsageLimitSnapshot? {

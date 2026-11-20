@@ -19,17 +19,23 @@ enum UsageLimitProvider: Hashable {
     case claude
     case claudeBridge
     case grok
+    case antigravity(String)
 
     var serviceName: String {
         switch self {
         case .codex: return "Codex"
         case .claude, .claudeBridge: return "Claude Code"
         case .grok: return "Grok"
+        case .antigravity: return ACPProvider.antigravityDisplayName
         }
     }
 
     static func from(model: ModelInfo?) -> UsageLimitProvider? {
         guard let model else { return nil }
+        if model.isAntigravityACP {
+            guard ACPPaths.isAntigravityInstalled else { return nil }
+            return .antigravity(model.name.isEmpty ? model.modelId : model.name)
+        }
         let provider = model.provider.lowercased()
         if provider == "claude-bridge" { return .claudeBridge }
         let kind: UsageLimitProvider
@@ -58,6 +64,7 @@ enum UsageLimitService {
             case .claude: return try await ClaudeUsageService.fetch()
             case .claudeBridge: return UsageLimitSnapshot(serviceName: provider.serviceName)
             case .grok: return try await GrokUsageService.fetch()
+            case .antigravity(let modelName): return try await AntigravityUsageService.fetch(modelName: modelName)
             }
         } catch {
             return UsageLimitSnapshot(serviceName: provider.serviceName, error: error.localizedDescription)
@@ -238,6 +245,101 @@ enum ClaudeUsageService {
     }
 }
 
+// `agy -p /usage` reports quota per model group, each with 5-hour and weekly buckets.
+// One fetch serves every model for a minute; the selected model picks its group.
+enum AntigravityUsageService {
+    static func fetch(modelName: String) async throws -> UsageLimitSnapshot {
+        let groups = try await cache.groups()
+        guard !groups.isEmpty else { throw FetchError.invalidResponse(ACPProvider.antigravityDisplayName) }
+        let selected = group(for: modelName, in: groups)
+        let ordered = [selected] + groups.filter { $0.name != selected.name }
+        return UsageLimitSnapshot(
+            serviceName: ACPProvider.antigravityDisplayName,
+            primary: window(selected, kind: "5h", label: "5h"),
+            weekly: window(selected, kind: "weekly", label: "Weekly"),
+            details: ordered.flatMap { group in
+                group.buckets.compactMap { bucket in
+                    let kind = bucket.window == "5h" ? "5h" : "Weekly"
+                    return window(bucket, label: "\(group.name) · \(kind)")
+                }
+            }
+        )
+    }
+
+    private static let cache = Cache()
+
+    private actor Cache {
+        private var cached: [AntigravityUsageGroup]?
+        private var fetchedAt: Date?
+        private var inFlight: Task<[AntigravityUsageGroup], Error>?
+
+        func groups() async throws -> [AntigravityUsageGroup] {
+            if let cached, let fetchedAt, Date().timeIntervalSince(fetchedAt) < 60 { return cached }
+            if let inFlight { return try await inFlight.value }
+            let task = Task.detached(priority: .utility) { try AntigravityUsageService.runUsageCommand() }
+            inFlight = task
+            defer { inFlight = nil }
+            let groups = try await task.value
+            cached = groups
+            fetchedAt = Date()
+            return groups
+        }
+    }
+
+    private static func runUsageCommand() throws -> [AntigravityUsageGroup] {
+        let executable = ACPPaths.antigravityExecutable
+        let prefix = executable.path == "/usr/bin/env" ? ["agy"] : []
+        let result = try ProcessRunner.capture(
+            executable: executable,
+            arguments: prefix + ["-p", "/usage", "--output-format", "json"],
+            environment: PiEnvironment.merged(), timeout: 25
+        )
+        guard result.status == 0 else {
+            let errorText = String(data: result.stderr, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw FetchError.agyCommandFailed(errorText?.isEmpty == false ? errorText! : "exit \(result.status)")
+        }
+        let decoded = try JSONDecoder().decode(AntigravityUsageResponse.self, from: result.stdout)
+        return decoded.command?.data?.groups ?? []
+    }
+
+    private static func group(for modelName: String, in groups: [AntigravityUsageGroup]) -> AntigravityUsageGroup {
+        let name = modelName.lowercased()
+        let members = groups.map { group in (group, memberNames(group)) }
+        if let exact = members.first(where: { $0.1.contains(name) }) { return exact.0 }
+        let prefixed = members.compactMap { group, names -> (AntigravityUsageGroup, Int)? in
+            guard let best = names.filter({ name.hasPrefix($0) }).map(\.count).max() else { return nil }
+            return (group, best)
+        }
+        if let best = prefixed.max(by: { $0.1 < $1.1 }) { return best.0 }
+        return groups.first { $0.name.lowercased() == name } ?? groups[0]
+    }
+
+    private static func memberNames(_ group: AntigravityUsageGroup) -> [String] {
+        guard let description = group.description,
+              let range = description.range(of: "Models within this group:", options: .caseInsensitive) else { return [] }
+        return description[range.upperBound...]
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "."))).lowercased() }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func window(_ group: AntigravityUsageGroup, kind: String, label: String) -> UsageLimitWindow? {
+        group.buckets.first { $0.window == kind }.flatMap { window($0, label: label) }
+    }
+
+    private static func window(_ bucket: AntigravityUsageBucket, label: String) -> UsageLimitWindow? {
+        guard let fraction = bucket.remainingFraction, fraction.isFinite else { return nil }
+        let resetText = bucket.resetTime
+            .flatMap { ISO8601DateFormatter().date(from: $0) }
+            .map { "in \(UsageLimitHelpers.formatDuration($0.timeIntervalSinceNow))" } ?? "unknown"
+        return UsageLimitWindow(
+            label: label,
+            remainingPercent: UsageLimitHelpers.clamp(Int((fraction * 100).rounded()), 0, 100),
+            resetText: resetText
+        )
+    }
+}
+
 enum GrokUsageService {
     private static let usageURL = URL(string: "https://cli-chat-proxy.grok.com/v1/billing?format=credits")!
 
@@ -372,6 +474,36 @@ private struct CodexWindowResponse: Decodable {
     }
 }
 
+private struct AntigravityUsageResponse: Decodable {
+    var command: Command?
+
+    struct Command: Decodable {
+        var data: Payload?
+    }
+
+    struct Payload: Decodable {
+        var groups: [AntigravityUsageGroup]?
+    }
+}
+
+private struct AntigravityUsageGroup: Decodable {
+    var name: String
+    var description: String?
+    var buckets: [AntigravityUsageBucket]
+}
+
+private struct AntigravityUsageBucket: Decodable {
+    var window: String?
+    var remainingFraction: Double?
+    var resetTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case window
+        case remainingFraction = "remaining_fraction"
+        case resetTime = "reset_time"
+    }
+}
+
 private struct GrokBillingResponse: Decodable {
     var config: GrokBillingConfig?
 }
@@ -399,6 +531,7 @@ private enum FetchError: LocalizedError {
     case authRejected(String)
     case http(String, Int)
     case claudeCommandFailed(String)
+    case agyCommandFailed(String)
     case noGrokCredential
     case grokAuthRejected
     case invalidGrokUsage
@@ -411,6 +544,7 @@ private enum FetchError: LocalizedError {
         case .authRejected(let provider): return "Codex auth rejected for \(provider). Run /login \(provider)."
         case .http(let service, let code): return "\(service) usage request failed: HTTP \(code)."
         case .claudeCommandFailed(let message): return "Claude usage request failed: \(message)"
+        case .agyCommandFailed(let message): return "Antigravity usage request failed: \(message)"
         case .noGrokCredential: return "No Grok OAuth credential found. Run /login xai."
         case .grokAuthRejected: return "Grok auth rejected. Run /login xai."
         case .invalidGrokUsage: return "Grok usage returned no weekly credit data."

@@ -219,7 +219,13 @@ struct ACPSessionSummary: Identifiable, Equatable, Hashable {
     let sessionID: String
     let cwd: String
     let title: String
-    let updatedAt: Date
+    let updatedAt: Date?
+}
+
+struct ACPSelections: Codable, Equatable, Hashable {
+    var modelID: String?
+    var thinkingLevel: String?
+    var modeID: String?
 }
 
 struct ACPChatRecord: Codable, Identifiable, Equatable, Hashable {
@@ -233,6 +239,7 @@ struct ACPChatRecord: Codable, Identifiable, Equatable, Hashable {
     var isQuickChat: Bool
     let created: Date
     var lastActivity: Date
+    var pendingSelections: ACPSelections?
 
     var standardizedProjectPath: String {
         URL(fileURLWithPath: projectPath).standardizedFileURL.path
@@ -360,15 +367,14 @@ enum ACPModelCatalogParser {
                 guard let id = item["id"] as? String, let name = item["name"] as? String else { return nil }
                 return ACPModeInfo(id: id, name: name, description: item["description"] as? String)
             }
-            let current = modesDict["currentModeId"] as? String ?? parsed.first?.id ?? "default"
-            if !parsed.isEmpty { return (parsed, current) }
+            if !parsed.isEmpty { return (parsed, modesDict["currentModeId"] as? String ?? "") }
         }
-        if let modeConfig = configOptions.first(where: { $0.category == "mode" || $0.id == "mode" }),
-           !modeConfig.options.isEmpty {
+        if let modeConfig = configOptions.first(where: { $0.category == "mode" || $0.id == "mode" }) {
             let parsed = modeConfig.options.map { ACPModeInfo(id: $0.value, name: $0.name, description: $0.description) }
-            return (parsed, modeConfig.currentValue.isEmpty ? (parsed.first?.id ?? "default") : modeConfig.currentValue)
+            return (parsed, modeConfig.currentValue)
         }
-        return (ACPModeInfo.antigravityDefaults, "default")
+        let modesDict = sessionResult["modes"] as? [String: Any]
+        return ([], modesDict?["currentModeId"] as? String ?? "")
     }
 
     static func parseModels(
@@ -454,25 +460,44 @@ enum ACPModelCatalogParser {
 
 /// Shared MCP & system prompt helpers for injecting PiG's `html_render` tool into ACP sessions.
 enum ACPHTMLRenderBridge {
-    static let systemPromptAppend = """
+    static let htmlRenderPromptAppend = """
     You have access to PiG's `html_render` tool via the `pig` MCP server.
     - Use `html_render` for small interactive controls, not for prose or full webpages. Keep notes and explanations in Markdown.
     - Insert each returned `[[pig-ui:...]]` marker on its own line where its controls belong in your answer. Never put the marker in a code fence.
     - Use PiG's default control styles; avoid body backgrounds, enclosing cards, fixed/minimum viewport heights, and redundant titles.
     """
 
-    static func mcpServersPayload() -> [[String: Any]] {
-        guard HTMLRenderPreference.isEnabled, let executable = ACPPaths.htmlMCPExecutable else { return [] }
+    static let piSubagentPromptAppend = """
+    You have access to PiG's `pi_subagent` tool via the `pig` MCP server. It runs a Pi coding agent with a fresh context and returns its final reply.
+    - Use `pi_subagent` only when the user asks for a Pi subagent. Launch it yourself only after the user approves.
+    - The child sees only the task you write. Include the outcome, absolute paths, scope, and what to report back.
+    """
+
+    static var systemPromptAppend: String {
+        (HTMLRenderPreference.isEnabled ? htmlRenderPromptAppend + "\n" : "") + piSubagentPromptAppend
+    }
+
+    static func mcpServersPayload(projectPath: String) -> [[String: Any]] {
+        guard let executable = ACPPaths.htmlMCPExecutable else { return [] }
+        var args = ["--pi-subagent", "--cwd", projectPath]
+        if HTMLRenderPreference.isEnabled { args.append("--html-render") }
+        let pi = PiPaths.piExecutable
+        if pi.path != "/usr/bin/env" { args += ["--pi", pi.path] }
         return [[
             "name": ACPProvider.htmlMCPServerName,
             "command": executable.path,
-            "args": [],
+            "args": args,
             "env": []
         ]]
     }
 
-    static func sessionMeta(includeHTMLRender: Bool) -> [String: Any]? {
-        guard includeHTMLRender else { return nil }
+    static func isPiSubagentToolName(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return lower == "pi_subagent" || lower.hasSuffix("_pi_subagent") || lower.hasSuffix("/pi_subagent") || lower.hasSuffix(".pi_subagent")
+    }
+
+    static func sessionMeta(includePiGTools: Bool) -> [String: Any]? {
+        guard includePiGTools else { return nil }
         return [
             "antigravity": [
                 "systemPrompt": [

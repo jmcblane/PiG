@@ -41,6 +41,7 @@ private struct SubagentRun: Identifiable, Hashable {
     let id: String
     let name: String
     let model: String?
+    let thinking: String?
     let prompt: String
     let parameters: [String]
     let activity: [SubagentOutputItem]
@@ -118,10 +119,16 @@ private struct SubagentPresentation: @unchecked Sendable {
             if activity.isEmpty && finalText == nil && fallbackToToolResult {
                 if status == .failed { error = error ?? tool.result.nonEmptyTrimmed } else { finalText = tool.result }
             }
+            if status == .succeeded && finalText == nil && details == nil && tool.result.isEmpty {
+                finalText = "_The agent did not pass the subagent's reply to PiG. Its summary is in the chat reply._"
+            }
             return SubagentRun(
                 id: resolvedMode == .parallel ? "\(index).0" : "0.\(index)",
                 name: name,
                 model: (result?["model"] as? String)?.nonEmptyTrimmed ?? (spec["model"] as? String)?.nonEmptyTrimmed,
+                thinking: (result?["thinkingLevel"] as? String)?.nonEmptyTrimmed
+                    ?? (spec["thinkingLevel"] as? String)?.nonEmptyTrimmed
+                    ?? (args["thinkingLevel"] as? String)?.nonEmptyTrimmed,
                 prompt: (result?["task"] as? String) ?? (spec["task"] as? String) ?? "",
                 parameters: Self.parameters(spec),
                 activity: activity,
@@ -199,7 +206,7 @@ private struct SubagentPresentation: @unchecked Sendable {
         if mode == .single {
             if toolStatus == .failed { return .failed }
             if toolStatus == .running { return .running }
-            guard let result else { return .queued }
+            guard let result else { return toolStatus == .succeeded ? .succeeded : .queued }
             return isFailed(result) ? .failed : .succeeded
         }
 
@@ -413,11 +420,11 @@ struct SubagentToolDetailsView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            modelChip(run.model)
+            modelChip(run.model, thinking: run.thinking)
                 .frame(maxWidth: 170, alignment: .trailing)
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
-                .help(run.model ?? "")
+                .help([run.model, run.thinking.map { "thinking \($0)" }].compactMap { $0 }.joined(separator: " · "))
             Image(systemName: "chevron.right")
                 .font(AppFonts.ui(9, weight: .bold))
                 .foregroundStyle(appTheme.muted)
@@ -439,17 +446,33 @@ struct SubagentToolDetailsView: View {
     }
 
     @ViewBuilder
-    private func modelChip(_ model: String?) -> some View {
+    private func modelChip(_ model: String?, thinking: String?) -> some View {
         if let model {
-            Text(model.split(separator: "/").last.map(String.init) ?? model)
-                .font(AppFonts.ui(10.5, weight: .medium))
-                .foregroundStyle(appTheme.muted)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1.5)
-                .background(Capsule().fill(appTheme.panel.opacity(0.7)))
-                .overlay(Capsule().stroke(appTheme.line.opacity(0.6), lineWidth: 1))
+            HStack(spacing: 4) {
+                Text(model.split(separator: "/").last.map(String.init) ?? model)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let thinking {
+                    Text("·").opacity(0.6)
+                    Text(Self.thinkingLabel(thinking))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            .font(AppFonts.ui(10.5, weight: .medium))
+            .foregroundStyle(appTheme.muted)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(appTheme.panel.opacity(0.7)))
+            .overlay(Capsule().stroke(appTheme.line.opacity(0.6), lineWidth: 1))
+        }
+    }
+
+    private static func thinkingLabel(_ level: String) -> String {
+        switch level {
+        case "minimal": "min"
+        case "medium": "med"
+        default: level
         }
     }
 

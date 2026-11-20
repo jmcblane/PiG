@@ -78,6 +78,12 @@ final class PiGAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            model?.markSelectedACPChatRead()
+        }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }

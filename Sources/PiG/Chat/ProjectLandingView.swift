@@ -19,8 +19,12 @@ struct ChatTabContent: View {
                 ChatScrollView(controller: acp, theme: theme)
                     .id(acp.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                ACPComposerView(controller: acp, draft: $draft, imageAttachments: $imageAttachments)
-                    .id(acp.id)
+                ACPComposerView(
+                    controller: acp,
+                    draft: Binding(get: { acp.draft }, set: { acp.draft = $0 }),
+                    imageAttachments: Binding(get: { acp.draftImages }, set: { acp.draftImages = $0 })
+                )
+                .id(acp.id)
             } else if let chatID = model.selectedHermesChatID {
                 if let hermes = model.selectedHermesController {
                     ChatScrollView(controller: hermes, theme: theme)
@@ -771,9 +775,11 @@ private struct ACPRecentSessionRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 8)
-                Text(summary.updatedAt.sidebarLabel)
-                    .font(AppFonts.ui(11.5))
-                    .foregroundStyle(appTheme.muted)
+                if let updatedAt = summary.updatedAt {
+                    Text(updatedAt.sidebarLabel)
+                        .font(AppFonts.ui(11.5))
+                        .foregroundStyle(appTheme.muted)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)

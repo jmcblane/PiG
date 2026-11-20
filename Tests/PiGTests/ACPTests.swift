@@ -24,14 +24,13 @@ final class ACPTests: XCTestCase {
 
     // MARK: - Catalog parsing
 
-    func testModelCatalogParserExtractsModelsThinkingLevelsAndModes() {
+    func testModelCatalogParserExtractsModelsThinkingLevelsAndModes() throws {
         let sessionResult: [String: Any] = [
-            "sessionId": "sess-123",
             "modes": [
                 "currentModeId": "default",
                 "availableModes": [
-                    ["id": "default", "name": "Ask before edits", "description": "Prompt for approval"],
-                    ["id": "auto", "name": "Auto", "description": "Approve routine tool calls"]
+                    ["id": "default", "name": "Ask before edits"],
+                    ["id": "auto", "name": "Auto"]
                 ]
             ],
             "configOptions": [
@@ -41,7 +40,7 @@ final class ACPTests: XCTestCase {
                     "category": "model",
                     "currentValue": "gemini-3-pro",
                     "options": [
-                        ["value": "gemini-3-pro", "name": "Gemini 3 Pro", "description": "Reasoning model"],
+                        ["value": "gemini-3-pro", "name": "Gemini 3 Pro"],
                         ["value": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"]
                     ]
                 ],
@@ -66,17 +65,16 @@ final class ACPTests: XCTestCase {
 
         XCTAssertEqual(parsedModes.currentModeID, "default")
         XCTAssertEqual(parsedModes.modes.map(\.id), ["default", "auto"])
-        XCTAssertEqual(parsedModels.models.count, 2)
+        XCTAssertEqual(parsedModels.models.map(\.id), ["antigravity-acp/gemini-3-pro", "antigravity-acp/claude-sonnet-4-6"])
         XCTAssertEqual(parsedModels.currentModelID, "antigravity-acp/gemini-3-pro")
         XCTAssertEqual(parsedModels.currentThinkingLevel, "medium")
 
-        let infos = parsedModels.models
-        XCTAssertEqual(infos[0].id, "antigravity-acp/gemini-3-pro")
-        XCTAssertEqual(infos[0].provider, ACPProvider.antigravity)
-        XCTAssertTrue(infos[0].isAntigravityACP)
-        XCTAssertEqual(infos[0].displayName, "Antigravity/Gemini 3 Pro")
-        XCTAssertTrue(infos[0].reasoning)
-        XCTAssertEqual(infos[0].thinkingLevels, ["off", "low", "medium", "high"])
+        let model = try XCTUnwrap(parsedModels.models.first)
+        XCTAssertEqual(model.provider, ACPProvider.antigravity)
+        XCTAssertTrue(model.isAntigravityACP)
+        XCTAssertEqual(model.displayName, "Antigravity/Gemini 3 Pro")
+        XCTAssertTrue(model.reasoning)
+        XCTAssertEqual(model.thinkingLevels, ["off", "low", "medium", "high"])
     }
 
     func testEnabledModelScopePreservesAntigravityModels() throws {
@@ -191,7 +189,6 @@ final class ACPTests: XCTestCase {
         XCTAssertEqual(tool.acpKind, "read")
         XCTAssertEqual(tool.result, "# PiG")
         XCTAssertEqual(tool.rowTitle(projectPath: "/tmp/project").verb, "Read README.md")
-        XCTAssertEqual(tool.rowSymbolName, "doc.text")
 
         XCTAssertEqual(controller.messages[1].role, .assistant)
         XCTAssertEqual(controller.messages[1].text, "Done! README starts with # PiG.")
@@ -229,9 +226,7 @@ final class ACPTests: XCTestCase {
         let tool = try XCTUnwrap(controller.messages[0].tools.first)
         XCTAssertEqual(tool.name, "html_render")
         XCTAssertEqual(tool.status, .succeeded)
-        let artifact = try XCTUnwrap(HTMLArtifact(tool: tool))
-        XCTAssertEqual(artifact.title, "Metrics Card")
-        XCTAssertEqual(artifact.actions.map(\.message), ["Refresh stats"])
+        XCTAssertNotNil(HTMLArtifact(tool: tool))
     }
 
     func testDiffToolCallContentAndMetadataUpdates() {

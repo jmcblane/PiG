@@ -1,7 +1,6 @@
 import Foundation
 import Combine
 
-/// Drives one ACP chat session (one dedicated `agy acp` subprocess per active chat).
 @MainActor
 final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionTarget {
     enum Event {
@@ -20,6 +19,8 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
     @Published private(set) var sessionID: String?
     @Published var title: String
     @Published var messages: [ChatMessage] = []
+    @Published var draft = ""
+    @Published var draftImages: [ImageAttachment] = []
     @Published private(set) var isWorking = false
     @Published private(set) var isThinking = false
     @Published private(set) var isCompacting = false
@@ -36,7 +37,7 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
     @Published private(set) var contextUsed: Int?
     @Published private(set) var contextWindow: Int?
     @Published private(set) var planEntries: [ACPPlanEntry] = []
-    @Published private(set) var permissionPrompt: ACPPermissionPrompt?
+    @Published private var permissionPrompts: [ACPPermissionPrompt] = []
     @Published private(set) var isProcessActive = false
     @Published private(set) var isLoadingHistory = false
     @Published private(set) var capabilities = ACPAgentCapabilities()
@@ -48,15 +49,29 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
     private(set) var lastRuntimeUse = Date()
     private var client: ACPClient?
     private let eventHandler: (Event) -> Void
-    private var startTask: Task<Void, Error>?
+    @Published private var isStarting = false
+    private var startTask: Task<Void, Error>? {
+        didSet { isStarting = startTask != nil }
+    }
+    private var startGeneration = 0
+    private var isSessionReady = false
+    private var settingsTask: Task<Void, Never>?
+    private(set) var pendingSelections: ACPSelections
+    private var rejectedModeError: Error?
+    private var modeConfigID: String?
     private var activePromptTask: Task<Void, Never>?
-    private var isReplayingHistory = false
+    private var isCancellingPrompt = false
+    private var promptID: UUID?
+    private var promptQueued = false
+    private var promptCancelTask: Task<Void, Never>?
+    private var replayUpdates: [[String: Any]]?
     private var rawInputByToolID: [String: [String: Any]] = [:]
     private var toolMetaByID: [String: (name: String, title: String?, kind: String?)] = [:]
     private var streamingBumpScheduled = false
-    private var hasReceivedReplayMessages = false
 
+    var permissionPrompt: ACPPermissionPrompt? { permissionPrompts.first }
     var hasLiveWork: Bool { isWorking || permissionPrompt != nil }
+    var canAbort: Bool { isWorking || isStarting }
     var supportsImages: Bool { capabilities.supportsImages }
     var activeModel: ModelInfo? { models.first { $0.id == selectedModelID } }
 
@@ -85,6 +100,7 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
         thinkingLevel: String = "high",
         modes: [ACPModeInfo] = ACPModeInfo.antigravityDefaults,
         modeID: String = ACPDefaultModePreference.modeID,
+        pendingSelections: ACPSelections? = nil,
         serverConfig: ACPServerConfig = .antigravity(),
         eventHandler: @escaping (Event) -> Void = { _ in }
     ) {
@@ -94,10 +110,15 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
         self.isQuickChat = isQuickChat
         self.title = title
         self.models = models
-        self.selectedModelID = selectedModelID.isEmpty ? (models.first?.id ?? "") : selectedModelID
+        let initialModelID = selectedModelID.isEmpty ? (models.first?.id ?? "") : selectedModelID
+        self.selectedModelID = initialModelID
         self.thinkingLevel = thinkingLevel
         self.modes = modes.isEmpty ? ACPModeInfo.antigravityDefaults : modes
         self.currentModeID = modeID
+        self.pendingSelections = pendingSelections ?? (sessionID == nil
+            ? ACPSelections(modelID: initialModelID.nonEmptyTrimmed,
+                            thinkingLevel: thinkingLevel.nonEmptyTrimmed, modeID: modeID.nonEmptyTrimmed)
+            : ACPSelections())
         self.serverConfig = serverConfig
         self.eventHandler = eventHandler
     }
@@ -105,6 +126,8 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
     deinit {
         startTask?.cancel()
         activePromptTask?.cancel()
+        settingsTask?.cancel()
+        promptCancelTask?.cancel()
         let owned = client
         Task { @MainActor in owned?.stop() }
     }
@@ -115,37 +138,59 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
 
     // MARK: - Process & session lifecycle
 
-    func ensureStarted() async throws {
+    private func startIfNeeded() -> Task<Void, Error>? {
         markRuntimeUsed()
-        if let client, client.isRunning, sessionID != nil {
-            isProcessActive = true
-            return
-        }
-        if let startTask {
-            return try await startTask.value
-        }
+        if let startTask { return startTask }
+        if isSessionReady, client?.isRunning == true { return nil }
 
+        startGeneration &+= 1
         let task = Task<Void, Error> { @MainActor in
-            defer { self.startTask = nil }
-            try await self.performStart()
+            defer { if !Task.isCancelled { self.startTask = nil } }
+            do {
+                try await self.performStart()
+            } catch {
+                try Task.checkCancellation()
+                throw error
+            }
         }
         startTask = task
-        return try await task.value
+        return task
     }
 
     func loadExistingSessionIfNeeded() async {
         guard sessionID != nil else { return }
-        if isProcessActive, !messages.isEmpty { return }
+        await connect()
+    }
+
+    func retryLogin() async {
+        guard !hasLiveWork else { return }
+        if isSessionReady { stopProcess() }
+        dismissedErrorToast = nil
+        await connect(keepLoginAvailable: true)
+    }
+
+    private func connect(keepLoginAvailable: Bool = false) async {
+        let task = startIfNeeded()
+        let generation = startGeneration
         do {
-            try await ensureStarted()
+            try await task?.value
+            guard !Task.isCancelled, startGeneration == generation else { return }
+            await applyPendingSelections()
+        } catch is CancellationError {
         } catch {
+            guard !Task.isCancelled, startGeneration == generation else { return }
+            if keepLoginAvailable { authRequired = true }
             handleError(error)
         }
     }
 
     private func performStart() async throws {
-        errorText = nil
-        authRequired = false
+        try Task.checkCancellation()
+        disconnectClient()
+        if isQuickChat {
+            try await AsyncFileSystem.createDirectory(at: URL(fileURLWithPath: projectPath, isDirectory: true))
+            try Task.checkCancellation()
+        }
 
         let client = ACPClient(config: serverConfig, workingDirectory: projectPath)
         client.onNotification = { [weak self] method, params in
@@ -162,155 +207,147 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
         }
 
         self.client = client
+        defer {
+            if self.client === client, !isSessionReady { disconnectClient() }
+        }
         try await client.start()
+        try Task.checkCancellation()
         isProcessActive = true
 
         let initResult = try await client.initialize()
+        try Task.checkCancellation()
         capabilities = initResult.capabilities
         authMethods = initResult.authMethods
 
-        let mcpServers = ACPHTMLRenderBridge.mcpServersPayload()
+        let mcpServers = ACPHTMLRenderBridge.mcpServersPayload(projectPath: projectPath)
         let includeMeta = serverConfig.isAntigravity
             && capabilities.supportsAntigravitySystemPromptAppend
             && !mcpServers.isEmpty
 
-        if let existingSessionID = sessionID, capabilities.loadSession {
+        if let existingSessionID = sessionID {
+            guard capabilities.loadSession else { throw ACPClient.ACPError.sessionLoadUnsupported }
             isLoadingHistory = true
-            isReplayingHistory = true
-            hasReceivedReplayMessages = false
-            rawInputByToolID.removeAll()
-            toolMetaByID.removeAll()
-            let previousMessages = messages
-            messages = []
-            defer {
-                isReplayingHistory = false
-                isLoadingHistory = false
-            }
-            do {
-                let result = try await client.loadSession(
-                    sessionID: existingSessionID,
-                    cwd: projectPath,
-                    mcpServers: mcpServers
-                )
-                finalizeReplayedMessages()
-                if !hasReceivedReplayMessages && !previousMessages.isEmpty {
-                    messages = previousMessages
+            replayUpdates = []
+            let result = try await client.loadSession(
+                sessionID: existingSessionID,
+                cwd: projectPath,
+                mcpServers: mcpServers
+            )
+            try Task.checkCancellation()
+            guard client.isRunning else { throw ACPClient.ACPError.notRunning }
+            var hasReplayMessages = false
+            let updates = (replayUpdates ?? []).filter { update in
+                let valid: Bool
+                switch update["sessionUpdate"] as? String {
+                case "user_message_chunk", "agent_message_chunk":
+                    guard let content = update["content"] as? [String: Any] else { return false }
+                    switch content["type"] as? String {
+                    case "text": valid = content["text"] is String
+                    case "image": valid = content["data"] is String
+                    default: return false
+                    }
+                case "agent_thought_chunk": valid = extractText(from: update["content"]) != nil
+                case "tool_call", "tool_call_update": valid = (update["toolCallId"] as? String)?.isEmpty == false
+                default: return true
                 }
-                applySessionMetadata(from: result, preserveRequestedModel: false)
-                bottomScrollRequest &+= 1
-            } catch {
-                if !hasReceivedReplayMessages && !previousMessages.isEmpty {
-                    messages = previousMessages
-                }
-                throw error
+                hasReplayMessages = hasReplayMessages || valid
+                return valid
             }
+            replayUpdates = nil
+            if hasReplayMessages {
+                messages = []
+                rawInputByToolID.removeAll()
+                toolMetaByID.removeAll()
+            }
+            for update in updates { handleSessionUpdate(update, isReplaying: true) }
+            if hasReplayMessages { finalizeReplayedMessages() }
+            applySessionMetadata(from: result)
+            isLoadingHistory = false
+            bottomScrollRequest &+= 1
         } else {
-            let requestedModelID = selectedModelID
-            let requestedThinking = thinkingLevel
-            let requestedModeID = currentModeID
-
             let result = try await client.newSession(
                 cwd: projectPath,
                 mcpServers: mcpServers,
-                meta: ACPHTMLRenderBridge.sessionMeta(includeHTMLRender: includeMeta)
+                meta: ACPHTMLRenderBridge.sessionMeta(includePiGTools: includeMeta)
             )
+            try Task.checkCancellation()
+            guard client.isRunning else { throw ACPClient.ACPError.notRunning }
             guard let createdID = result["sessionId"] as? String, !createdID.isEmpty else {
                 throw ACPClient.ACPError.invalidPayload
             }
             sessionID = createdID
-            applySessionMetadata(from: result, preserveRequestedModel: false)
+            applySessionMetadata(from: result)
             eventHandler(.sessionBound(createdID))
-
-            // Apply the model, thinking level, and mode chosen on the landing page.
-            await applyInitialSelections(
-                modelID: requestedModelID,
-                thinking: requestedThinking,
-                modeID: requestedModeID
-            )
         }
+        isSessionReady = true
+        if authRequired { errorText = nil }
+        authRequired = false
     }
 
-    private func applyInitialSelections(modelID: String, thinking: String, modeID: String) async {
-        if !modelID.isEmpty, modelID != selectedModelID {
-            await setModel(modelID)
-        }
-        if !thinking.isEmpty, thinking != thinkingLevel, availableThinkingLevels.contains(thinking) {
-            await setThinkingLevel(thinking)
-        }
-        if !modeID.isEmpty, modeID != currentModeID, modes.contains(where: { $0.id == modeID }) {
-            await setMode(modeID)
-        }
-    }
+    private typealias LiveSession = (client: ACPClient, id: String)
 
-    func stopProcess() {
-        startTask?.cancel()
-        startTask = nil
-        activePromptTask?.cancel()
-        activePromptTask = nil
-        if let prompt = permissionPrompt, let client, client.isRunning {
-            try? client.respond(id: prompt.rpcRequestID, result: ["outcome": ["outcome": "cancelled"]])
-        }
-        permissionPrompt = nil
+    private func disconnectClient() {
+        settingsTask?.cancel()
+        settingsTask = nil
+        rejectedModeError = nil
+        cancelPendingPermissions()
         client?.onNotification = nil
         client?.onRequest = nil
         client?.onTermination = nil
         client?.stop()
         client = nil
+        isSessionReady = false
         isProcessActive = false
-        if isWorking || isThinking {
-            isWorking = false
-            isThinking = false
-            finalizeStreamingMessages(stopReason: "cancelled")
-            eventHandler(.activityChanged)
-        }
+        replayUpdates = nil
+        isLoadingHistory = false
+    }
+
+    func stopProcess() {
+        startGeneration &+= 1
+        startTask?.cancel()
+        startTask = nil
+        activePromptTask?.cancel()
+        if promptQueued { finalizeStreamingMessages(stopReason: "cancelled") }
+        disconnectClient()
+        if promptID != nil { finishPrompt() }
     }
 
     // MARK: - Prompting & control
 
-    func send(_ text: String, images: [ImageAttachment] = []) async {
+    func sendDraft(_ submittedDraft: String, images submittedImages: [ImageAttachment], normalizedText: String? = nil) async {
+        await send(normalizedText ?? submittedDraft, images: submittedImages) {
+            if self.draft == submittedDraft { self.draft = "" }
+            let submittedIDs = Set(submittedImages.map(\.id))
+            self.draftImages.removeAll { submittedIDs.contains($0.id) }
+        }
+    }
+
+    @discardableResult
+    func send(_ text: String, images: [ImageAttachment] = [], onQueued: @escaping () -> Void = {}) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !images.isEmpty else { return }
-        guard !isWorking else { return }
+        guard !trimmed.isEmpty || !images.isEmpty, promptID == nil else { return false }
 
         errorText = nil
         dismissedErrorToast = nil
-        authRequired = false
         markRuntimeUsed()
 
         let prepared = PromptEnvelope.prepare(canonicalText: trimmed, projectPath: projectPath)
-        let userMessage = ChatMessage(
-            id: "acp-user-\(UUID().uuidString)",
-            role: .user,
-            text: prepared.displayText,
-            canonicalText: prepared.canonicalText,
-            references: prepared.references,
-            images: images,
-            timestamp: Date(),
-            isStreaming: false
-        )
-        messages.append(userMessage)
-        if title == "Untitled" || title.isEmpty {
-            let preview = prepared.displayText.nonEmptyTrimmed ?? (images.isEmpty ? "Untitled" : "Image")
-            title = preview.oneLine(max: 64)
-            eventHandler(.metadataChanged)
-        }
-        bottomScrollRequest &+= 1
-
+        let id = UUID()
+        promptID = id
         isWorking = true
         isThinking = false
         planEntries = []
         eventHandler(.activityChanged)
 
+        var queued = false
         let task = Task { @MainActor in
-            defer {
-                self.activePromptTask = nil
-                self.isWorking = false
-                self.isThinking = false
-                self.permissionPrompt = nil
-                self.eventHandler(.activityChanged)
-            }
+            defer { if self.promptID == id { self.finishPrompt() } }
             do {
-                try await self.ensureStarted()
+                try await self.startIfNeeded()?.value
+                try Task.checkCancellation()
+                await self.applyPendingSelections(retryRejectedMode: true)
+                try Task.checkCancellation()
+                try self.checkRequestedMode()
                 guard let client = self.client, let sid = self.sessionID else {
                     throw ACPClient.ACPError.notRunning
                 }
@@ -321,55 +358,105 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
                 }
                 for image in images {
                     if let data = image.data {
-                        blocks.append([
-                            "type": "image",
-                            "data": data,
-                            "mimeType": image.mimeType
-                        ])
+                        blocks.append(["type": "image", "data": data, "mimeType": image.mimeType])
                     }
                 }
-                if blocks.isEmpty {
-                    blocks.append(["type": "text", "text": trimmed])
-                }
+                if blocks.isEmpty { blocks.append(["type": "text", "text": trimmed]) }
 
-                let result = try await client.prompt(sessionID: sid, blocks: blocks)
+                let result = try await client.prompt(sessionID: sid, blocks: blocks, beforeQueue: {
+                    try self.checkRequestedMode()
+                }, onQueued: {
+                    queued = true
+                    self.promptQueued = true
+                    self.messages.append(ChatMessage(
+                        id: "acp-user-\(id.uuidString)", role: .user, text: prepared.displayText,
+                        canonicalText: prepared.canonicalText, references: prepared.references,
+                        images: images, timestamp: Date(), isStreaming: false
+                    ))
+                    if self.title == "Untitled" || self.title.isEmpty {
+                        let preview = prepared.displayText.nonEmptyTrimmed ?? (images.isEmpty ? "Untitled" : "Image")
+                        self.title = preview.oneLine(max: 64)
+                        self.eventHandler(.metadataChanged)
+                    }
+                    self.bottomScrollRequest &+= 1
+                    onQueued()
+                })
+                guard self.promptID == id else { return }
                 let stopReason = (result["stopReason"] as? String) ?? "end_turn"
+                guard stopReason != "cancelled", !self.isCancellingPrompt else { throw CancellationError() }
                 self.finalizeStreamingMessages(stopReason: stopReason == "end_turn" ? "stop" : stopReason)
                 self.markRuntimeUsed()
                 self.eventHandler(.replyFinished)
-            } catch is CancellationError {
-                self.finalizeStreamingMessages(stopReason: "cancelled")
             } catch {
-                self.finalizeStreamingMessages(stopReason: "error")
-                self.handleError(error)
+                guard self.promptID == id else { return }
+                if error is CancellationError || Task.isCancelled || self.isCancellingPrompt {
+                    if queued { self.finalizeStreamingMessages(stopReason: "cancelled") }
+                } else {
+                    if queued { self.finalizeStreamingMessages(stopReason: "error") }
+                    self.handleError(error)
+                }
             }
         }
         activePromptTask = task
         await task.value
+        return queued
     }
 
     @discardableResult
     func sendHTMLWidgetMessage(_ rawText: String) async -> Bool {
         guard let text = rawText.nonEmptyTrimmed, text.utf16.count <= 2000,
               !text.hasPrefix("/"), !text.hasPrefix("!") else { return false }
-        await send(text, images: [])
-        return true
+        return await send(text)
     }
 
-    func abort() async {
-        if let prompt = permissionPrompt {
-            cancelPermission(prompt)
-        }
-        guard let client, client.isRunning, let sid = sessionID else {
-            activePromptTask?.cancel()
+    func abort() {
+        guard let id = promptID else {
+            if startTask != nil { stopProcess() }
             return
         }
-        try? client.cancel(sessionID: sid)
+        guard !isCancellingPrompt else { return }
+        guard promptQueued else {
+            if isSessionReady {
+                activePromptTask?.cancel()
+                finishPrompt()
+            } else {
+                stopProcess()
+            }
+            return
+        }
+        isCancellingPrompt = true
+        cancelPendingPermissions()
+        guard let client, let sid = sessionID else { stopProcess(); return }
+        do {
+            try client.cancel(sessionID: sid)
+        } catch {
+            stopProcess()
+            return
+        }
+        promptCancelTask = Task { @MainActor [weak self, weak client] in
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            guard let self, let client, self.client === client, self.promptID == id else { return }
+            self.stopProcess()
+        }
     }
 
-    func respondToPermission(optionID: String) {
-        guard let prompt = permissionPrompt else { return }
-        permissionPrompt = nil
+    private func finishPrompt() {
+        promptCancelTask?.cancel()
+        promptCancelTask = nil
+        activePromptTask = nil
+        promptID = nil
+        promptQueued = false
+        isCancellingPrompt = false
+        isWorking = false
+        isThinking = false
+        cancelPendingPermissions()
+        eventHandler(.activityChanged)
+    }
+
+    func respondToPermission(promptID: String, optionID: String) {
+        guard let prompt = permissionPrompt, prompt.id == promptID,
+              prompt.options.contains(where: { $0.optionId == optionID }) else { return }
+        permissionPrompts.removeFirst()
         eventHandler(.activityChanged)
         guard let client, client.isRunning else { return }
         do {
@@ -382,60 +469,126 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
         }
     }
 
-    func cancelPermission(_ explicit: ACPPermissionPrompt? = nil) {
-        guard let prompt = explicit ?? permissionPrompt else { return }
-        if permissionPrompt?.id == prompt.id {
-            permissionPrompt = nil
-            eventHandler(.activityChanged)
-        }
-        guard let client, client.isRunning else { return }
-        try? client.respond(id: prompt.rpcRequestID, result: ["outcome": ["outcome": "cancelled"]])
+    func cancelPermission(promptID: String) {
+        guard let prompt = permissionPrompt, prompt.id == promptID else { return }
+        permissionPrompts.removeFirst()
+        sendPermissionCancellation(id: prompt.rpcRequestID)
+        eventHandler(.activityChanged)
+    }
+
+    private func cancelPendingPermissions() {
+        guard !permissionPrompts.isEmpty else { return }
+        for prompt in permissionPrompts { sendPermissionCancellation(id: prompt.rpcRequestID) }
+        permissionPrompts.removeAll()
+        eventHandler(.activityChanged)
+    }
+
+    private func sendPermissionCancellation(id: ACPJSONID) {
+        try? client?.respond(id: id, result: ["outcome": ["outcome": "cancelled"]])
     }
 
     func setModel(_ fullModelID: String) async {
-        let bareModelID = bareID(from: fullModelID)
-        let normalized = fullModelID.contains("/") ? fullModelID : "\(ACPProvider.antigravity)/\(bareModelID)"
-        selectedModelID = normalized
-        if let model = activeModel, !model.thinkingLevels.contains(thinkingLevel), let first = model.thinkingLevels.first {
-            thinkingLevel = first
-        }
+        pendingSelections.modelID = fullModelID.contains("/") ? fullModelID : "\(ACPProvider.antigravity)/\(fullModelID)"
         eventHandler(.metadataChanged)
-
-        guard let client, client.isRunning, let sid = sessionID else { return }
-        do {
-            let result = try await client.setConfigOption(sessionID: sid, configID: "model", value: bareModelID)
-            applyConfigOptions(from: result["configOptions"])
-        } catch {
-            handleError(error)
-        }
+        await applyPendingSelections()
     }
 
     func setThinkingLevel(_ level: String) async {
-        thinkingLevel = level
+        pendingSelections.thinkingLevel = level
         eventHandler(.metadataChanged)
-        guard let client, client.isRunning, let sid = sessionID else { return }
-        do {
-            let result = try await client.setConfigOption(sessionID: sid, configID: "thought_level", value: level)
-            applyConfigOptions(from: result["configOptions"])
-        } catch {
-            handleError(error)
-        }
+        await applyPendingSelections()
     }
 
     func setMode(_ modeID: String) async {
-        currentModeID = modeID
+        pendingSelections.modeID = modeID
+        if rejectedModeError?.localizedDescription == errorText { errorText = nil }
+        rejectedModeError = nil
         eventHandler(.metadataChanged)
-        guard let client, client.isRunning, let sid = sessionID else { return }
-        do {
-            let result = try await client.setConfigOption(sessionID: sid, configID: "mode", value: modeID)
-            applyConfigOptions(from: result["configOptions"])
-        } catch {
-            // Fall back to standard ACP `session/set_mode` for non-configOption servers.
-            do {
-                _ = try await client.setMode(sessionID: sid, modeID: modeID)
-            } catch {
-                handleError(error)
+        await applyPendingSelections()
+    }
+
+    private func applyPendingSelections(retryRejectedMode: Bool = false) async {
+        if retryRejectedMode { rejectedModeError = nil }
+        if let settingsTask { return await settingsTask.value }
+        guard isSessionReady, let client, client.isRunning, let sessionID else { return }
+        let task = Task { @MainActor in
+            defer { if !Task.isCancelled { self.settingsTask = nil } }
+            let session = (client: client, id: sessionID)
+            while !Task.isCancelled {
+                if let model = self.pendingSelections.modelID {
+                    await self.applySelection(\.modelID, value: model) {
+                        if self.selectedModelID != model {
+                            try await self.applyConfig("model", value: self.bareID(from: model), session: session)
+                        }
+                        guard self.selectedModelID == model else {
+                            throw ACPClient.ACPError.settingUnconfirmed("model", model)
+                        }
+                    }
+                } else if let level = self.pendingSelections.thinkingLevel {
+                    await self.applySelection(\.thinkingLevel, value: level) {
+                        if self.thinkingLevel != level {
+                            try await self.applyConfig("thought_level", value: level, session: session)
+                        }
+                        guard self.thinkingLevel == level else {
+                            throw ACPClient.ACPError.settingUnconfirmed("thinking level", level)
+                        }
+                    }
+                } else if let mode = self.pendingSelections.modeID, self.rejectedModeError == nil {
+                    await self.applySelection(\.modeID, value: mode) {
+                        try await self.applyMode(mode, session: session)
+                    }
+                } else {
+                    return
+                }
             }
+        }
+        settingsTask = task
+        await task.value
+    }
+
+    private func applySelection(_ setting: WritableKeyPath<ACPSelections, String?>, value: String, apply: () async throws -> Void) async {
+        do {
+            try await apply()
+            guard !Task.isCancelled, pendingSelections[keyPath: setting] == value else { return }
+            pendingSelections[keyPath: setting] = nil
+        } catch {
+            guard !Task.isCancelled, pendingSelections[keyPath: setting] == value else { return }
+            if setting == \.modeID { rejectedModeError = error }
+            else { pendingSelections[keyPath: setting] = nil }
+            dismissedErrorToast = nil
+            handleError(error)
+        }
+        eventHandler(.metadataChanged)
+    }
+
+    private func applyConfig(_ id: String, value: String, session: LiveSession) async throws {
+        let result = try await session.client.setConfigOption(sessionID: session.id, configID: id, value: value)
+        try Task.checkCancellation()
+        applyConfigOptions(from: result["configOptions"])
+    }
+
+    private func applyMode(_ mode: String, session: LiveSession) async throws {
+        guard currentModeID != mode else { return }
+        guard modes.contains(where: { $0.id == mode }) else {
+            throw ACPClient.ACPError.modeUnavailable(mode)
+        }
+        if let modeConfigID {
+            do {
+                try await applyConfig(modeConfigID, value: mode, session: session)
+                guard currentModeID == mode else { throw ACPClient.ACPError.settingUnconfirmed("permission mode", mode) }
+                return
+            } catch ACPClient.ACPError.rpcError(code: -32601, message: _) {
+                try Task.checkCancellation()
+            }
+        }
+        _ = try await session.client.setMode(sessionID: session.id, modeID: mode)
+        try Task.checkCancellation()
+        currentModeID = mode
+    }
+
+    private func checkRequestedMode() throws {
+        if let mode = pendingSelections.modeID {
+            throw rejectedModeError ?? ACPClient.ACPError.settingUnconfirmed("permission mode", mode)
         }
     }
 
@@ -447,7 +600,11 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
             return
         }
         guard let update = params["update"] as? [String: Any] else { return }
-        handleSessionUpdate(update, isReplaying: isReplayingHistory)
+        if replayUpdates != nil {
+            replayUpdates?.append(update)
+        } else {
+            handleSessionUpdate(update)
+        }
     }
 
     /// Internal so unit tests can drive ACP `session/update` notifications directly.
@@ -456,11 +613,9 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
 
         switch kind {
         case "user_message_chunk":
-            if isReplaying { hasReceivedReplayMessages = true }
             appendUserChunk(content: update["content"] as? [String: Any])
 
         case "agent_thought_chunk":
-            if isReplaying { hasReceivedReplayMessages = true }
             if let text = extractText(from: update["content"]) {
                 let idx = ensureAssistantMessage(forTool: false, isReplaying: isReplaying)
                 messages[idx].thinking += text
@@ -471,7 +626,6 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
             }
 
         case "agent_message_chunk":
-            if isReplaying { hasReceivedReplayMessages = true }
             let idx = ensureAssistantMessage(forTool: false, isReplaying: isReplaying)
             if let content = update["content"] as? [String: Any] {
                 let type = content["type"] as? String
@@ -488,7 +642,6 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
             }
 
         case "tool_call", "tool_call_update":
-            if isReplaying { hasReceivedReplayMessages = true }
             handleToolCallUpdate(update, isReplaying: isReplaying)
 
         case "plan":
@@ -548,6 +701,11 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
             return
         }
 
+        if isCancellingPrompt {
+            sendPermissionCancellation(id: id)
+            return
+        }
+
         let toolCall = params["toolCall"] as? [String: Any] ?? [:]
         let toolCallID = toolCall["toolCallId"] as? String ?? UUID().uuidString
         let rawTitle = (toolCall["title"] as? String)?.nonEmptyTrimmed ?? "Tool action"
@@ -564,16 +722,6 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
             )
         }
 
-        // Auto-approve ONLY our own stateless `pig` `html_render` MCP widget tool.
-        if isHTMLRenderToolCall(toolCall: toolCall, toolCallID: toolCallID, title: rawTitle, rawInput: rawInput),
-           let allowOption = options.first(where: { $0.kind == "allow_once" || $0.kind == "allow_always" }) {
-            try? client?.respond(
-                id: id,
-                result: ["outcome": ["outcome": "selected", "optionId": allowOption.optionId]]
-            )
-            return
-        }
-
         var detailParts: [String] = []
         if let rawInput, !rawInput.isEmpty {
             if let cmd = rawInput["command"] as? String {
@@ -586,7 +734,7 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
         }
         let detail = detailParts.joined(separator: "\n").nonEmptyTrimmed
 
-        permissionPrompt = ACPPermissionPrompt(
+        permissionPrompts.append(ACPPermissionPrompt(
             id: UUID().uuidString,
             rpcRequestID: id,
             toolCallID: toolCallID,
@@ -594,7 +742,7 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
             detail: detail,
             kind: kind,
             options: options
-        )
+        ))
         eventHandler(.activityChanged)
     }
 
@@ -675,7 +823,11 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
             title: resolvedTitle,
             rawInput: cachedInput
         )
-        let normalizedName = isHTML ? "html_render" : rawName
+        let isPiSubagent = !isHTML && (
+            existingMeta?.name == "subagent"
+                || [metaName, resolvedTitle].contains { $0.map(ACPHTMLRenderBridge.isPiSubagentToolName) == true }
+        )
+        let normalizedName = isHTML ? "html_render" : isPiSubagent ? "subagent" : rawName
         toolMetaByID[toolCallID] = (name: normalizedName, title: resolvedTitle, kind: resolvedKind)
 
         let status = mapToolStatus(update["status"] as? String)
@@ -702,8 +854,13 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
             if !resultImages.isEmpty { existing.images = resultImages }
             existing.status = status
             existing.isError = existing.isError || isError
-            if let resolvedTitle { existing.acpTitle = resolvedTitle }
-            if let resolvedKind { existing.acpKind = resolvedKind }
+            if isPiSubagent {
+                existing.acpTitle = nil
+                existing.acpKind = nil
+            } else {
+                if let resolvedTitle { existing.acpTitle = resolvedTitle }
+                if let resolvedKind { existing.acpKind = resolvedKind }
+            }
             messages[location.messageIndex].tools[location.toolIndex] = existing
         } else {
             let msgIndex = ensureAssistantMessage(forTool: true, isReplaying: isReplaying)
@@ -716,8 +873,8 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
                 images: resultImages,
                 status: status,
                 isError: isError,
-                acpTitle: isHTML ? nil : resolvedTitle,
-                acpKind: isHTML ? nil : resolvedKind
+                acpTitle: isHTML || isPiSubagent ? nil : resolvedTitle,
+                acpKind: isHTML || isPiSubagent ? nil : resolvedKind
             )
             messages[msgIndex].tools.append(tool)
         }
@@ -855,7 +1012,8 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
                 messages[index].stopReason = stopReason
             }
         }
-        if let lastAssistant = messages.indices.last(where: { messages[$0].role == .assistant }) {
+        if let lastAssistant = messages.indices.last(where: { messages[$0].role == .assistant }),
+           messages.indices.last(where: { messages[$0].role == .user }).map({ $0 < lastAssistant }) ?? true {
             messages[lastAssistant].isStreaming = false
             if messages[lastAssistant].completedAt == nil {
                 messages[lastAssistant].completedAt = now
@@ -878,30 +1036,16 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
         streamingFrameToken &+= 1
     }
 
-    private func applySessionMetadata(from result: [String: Any], preserveRequestedModel: Bool) {
+    private func applySessionMetadata(from result: [String: Any]) {
         let configOptions = ACPModelCatalogParser.parseConfigOptions(result["configOptions"])
         let parsedModels = ACPModelCatalogParser.parseModels(from: result, configOptions: configOptions)
         let parsedModes = ACPModelCatalogParser.parseModes(from: result, configOptions: configOptions)
-
-        if !parsedModels.models.isEmpty {
-            models = parsedModels.models
-        }
-        if !preserveRequestedModel {
-            if let current = parsedModels.currentModelID, !current.isEmpty {
-                selectedModelID = current
-            } else if selectedModelID.isEmpty, let first = models.first {
-                selectedModelID = first.id
-            }
-            if let thought = parsedModels.currentThinkingLevel, !thought.isEmpty {
-                thinkingLevel = thought
-            }
-        }
-        if !parsedModes.modes.isEmpty {
-            modes = parsedModes.modes
-        }
-        if !preserveRequestedModel, !parsedModes.currentModeID.isEmpty {
-            currentModeID = parsedModes.currentModeID
-        }
+        if !parsedModels.models.isEmpty { models = parsedModels.models }
+        selectedModelID = parsedModels.currentModelID ?? ""
+        thinkingLevel = parsedModels.currentThinkingLevel ?? ""
+        modes = parsedModes.modes
+        currentModeID = parsedModes.currentModeID
+        modeConfigID = configOptions.first { $0.category == "mode" || $0.id == "mode" }?.id
         eventHandler(.metadataChanged)
     }
 
@@ -933,6 +1077,7 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
             }
         }
         if let modeConfig = configOptions.first(where: { $0.category == "mode" || $0.id == "mode" }) {
+            modeConfigID = modeConfig.id
             if !modeConfig.options.isEmpty {
                 modes = modeConfig.options.map { ACPModeInfo(id: $0.value, name: $0.name, description: $0.description) }
             }
@@ -944,16 +1089,11 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
     }
 
     private func handleTermination(status: Int32) {
+        isSessionReady = false
         isProcessActive = false
-        permissionPrompt = nil
-        if isWorking {
-            isWorking = false
-            isThinking = false
-            finalizeStreamingMessages(stopReason: "error")
-            if status != 0 {
-                errorText = "Antigravity ACP process exited unexpectedly (status \(status))."
-            }
-            eventHandler(.activityChanged)
+        cancelPendingPermissions()
+        if promptQueued, !isCancellingPrompt, status != 0 {
+            errorText = "Antigravity ACP process exited unexpectedly (status \(status))."
         }
     }
 

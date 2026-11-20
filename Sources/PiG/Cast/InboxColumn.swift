@@ -802,14 +802,14 @@ private struct InboxSessionListRow: View {
         .onHover { hovering = $0 }
     }
 
-    private var hasStatus: Bool { needsInput || (working && !selected) || finishedUnseen }
+    private var hasStatus: Bool { needsInput || working || finishedUnseen }
 
     @ViewBuilder private var statusIndicator: some View {
         if needsInput {
             InboxDot(color: appTheme.brass).help("Needs input")
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Needs input")
-        } else if working && !selected {
+        } else if working {
             InboxWorkingDots().help("Working")
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Working")

@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-// Minimal stateless stdio MCP server exposing PiG's `html_render` tool for ACP agents
+// Minimal stdio MCP server exposing PiG's `html_render` and `pi_subagent` tools for ACP agents
 // such as Antigravity (`agy acp`). Passed per-session via ACP `session/new.mcpServers`
 // without modifying any global agent configuration.
 
@@ -71,11 +71,47 @@ private let htmlRenderTool: [String: Any] = [
     ]
 ]
 
+private let outputLock = NSLock()
+
 private func writeJSON(_ object: [String: Any]) {
     guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
     var out = data
     out.append(0x0A)
+    outputLock.lock()
     FileHandle.standardOutput.write(out)
+    outputLock.unlock()
+}
+
+private struct Options {
+    var htmlRender = false
+    var piSubagent = false
+    var piExecutable: String?
+    var cwd = FileManager.default.currentDirectoryPath
+}
+
+private let options: Options = {
+    var result = Options()
+    var iterator = CommandLine.arguments.dropFirst().makeIterator()
+    var sawFlag = false
+    while let argument = iterator.next() {
+        switch argument {
+        case "--html-render": result.htmlRender = true; sawFlag = true
+        case "--pi-subagent": result.piSubagent = true; sawFlag = true
+        case "--pi": result.piExecutable = iterator.next()
+        case "--cwd": if let cwd = iterator.next() { result.cwd = cwd }
+        default: break
+        }
+    }
+    if !sawFlag { result.htmlRender = true }
+    if ProcessInfo.processInfo.environment["PI_SUBAGENT_CHILD"] == "1" { result.piSubagent = false }
+    return result
+}()
+
+private let subagentRunner = PiSubagentRunner(piExecutable: options.piExecutable, baseDirectory: options.cwd)
+
+private func requestKey(_ id: Any) -> String {
+    if let string = id as? String { return "s:\(string)" }
+    return "n:\(id)"
 }
 
 private func respond(id: Any, result: [String: Any]) {
@@ -97,7 +133,7 @@ private func respondError(id: Any, code: Int, message: String) {
     ])
 }
 
-private func toolError(_ message: String) -> [String: Any] {
+func toolError(_ message: String) -> [String: Any] {
     [
         "isError": true,
         "content": [
@@ -163,6 +199,13 @@ private func handleMessage(_ message: [String: Any]) {
     guard let method = message["method"] as? String else { return }
     let id = message["id"]
 
+    if method == "notifications/cancelled" {
+        if let params = message["params"] as? [String: Any], let requestID = params["requestId"] {
+            subagentRunner.cancel(requestKey: requestKey(requestID))
+        }
+        return
+    }
+
     // Notifications (no id) require no response.
     guard let id else { return }
 
@@ -184,20 +227,45 @@ private func handleMessage(_ message: [String: Any]) {
     case "ping":
         respond(id: id, result: [:])
     case "tools/list":
+        var tools: [[String: Any]] = []
+        if options.htmlRender { tools.append(htmlRenderTool) }
+        if options.piSubagent { tools.append(piSubagentTool) }
         respond(id: id, result: [
-            "tools": [htmlRenderTool]
+            "tools": tools
         ])
     case "tools/call":
         guard let name = params["name"] as? String else {
             respondError(id: id, code: -32602, message: "Missing tool name")
             return
         }
-        guard name == "html_render" else {
-            respond(id: id, result: toolError("Unknown tool: \(name)"))
-            return
-        }
         let arguments = params["arguments"] as? [String: Any] ?? [:]
-        respond(id: id, result: executeHTMLRender(arguments: arguments))
+        switch name {
+        case "html_render" where options.htmlRender:
+            respond(id: id, result: executeHTMLRender(arguments: arguments))
+        case "pi_subagent" where options.piSubagent:
+            let key = requestKey(id)
+            guard subagentRunner.register(requestKey: key) else {
+                respond(id: id, result: toolError("Subagent request was rejected: the bridge is shutting down or the request ID is already running."))
+                return
+            }
+            let progressToken = (params["_meta"] as? [String: Any])?["progressToken"]
+            let progress: ((Int, String) -> Void)? = progressToken.map { token in
+                { step, summary in
+                    writeJSON([
+                        "jsonrpc": "2.0",
+                        "method": "notifications/progress",
+                        "params": ["progressToken": token, "progress": step, "message": summary]
+                    ])
+                }
+            }
+            DispatchQueue.global().async {
+                if let result = subagentRunner.run(requestKey: key, arguments: arguments, progress: progress) {
+                    respond(id: id, result: result)
+                }
+            }
+        default:
+            respond(id: id, result: toolError("Unknown tool: \(name)"))
+        }
     default:
         respondError(id: id, code: -32601, message: "Method not found: \(method)")
     }
@@ -221,3 +289,4 @@ while true {
         handleMessage(object)
     }
 }
+subagentRunner.shutdown()

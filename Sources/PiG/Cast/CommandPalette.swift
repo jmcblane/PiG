@@ -380,14 +380,15 @@ struct CommandPalette: View {
         let discoveredACP = model.acpSessionsByProject.values
             .flatMap { $0 }
             .filter { seenACPSessionIDs.insert($0.sessionID).inserted }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
             .map { summary -> PaletteItem in
                 let isQuick = model.isQuickChatsProject(summary.cwd)
                 let place = isQuick ? "Quick chat" : model.projectDisplayName(for: summary.cwd)
+                let activity = summary.updatedAt.map { ", \($0.formatted(.relative(presentation: .named)))" } ?? ""
                 return PaletteItem(
                     id: "acp-session:\(summary.sessionID)", kind: .sessions,
                     title: summary.title.isEmpty ? "Untitled" : summary.title,
-                    subtitle: "\(place) · \(ACPProvider.antigravityDisplayName), \(summary.updatedAt.formatted(.relative(presentation: .named)))",
+                    subtitle: "\(place) · \(ACPProvider.antigravityDisplayName)\(activity)",
                     icon: .chat(isQuick ? .quickChat : .project(path: summary.cwd)),
                     keywords: "antigravity acp"
                 ) { model.openACPSession(summary) }

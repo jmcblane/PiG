@@ -39,6 +39,9 @@ final class ACPClient {
         case executableMissing(String)
         case launchFailed(String)
         case invalidPayload
+        case sessionLoadUnsupported
+        case modeUnavailable(String)
+        case settingUnconfirmed(String, String)
         case rpcError(code: Int, message: String)
         case authRequired(String)
         case timedOut(String)
@@ -50,6 +53,9 @@ final class ACPClient {
             case .executableMissing(let path): return "ACP executable not found at \(path)."
             case .launchFailed(let message): return message
             case .invalidPayload: return "Invalid ACP JSON-RPC payload."
+            case .sessionLoadUnsupported: return "This ACP agent cannot load saved sessions."
+            case .modeUnavailable(let mode): return "Permission mode ‘\(mode)’ is unavailable. Choose another mode before sending."
+            case .settingUnconfirmed(let setting, let value): return "Antigravity did not confirm \(setting) ‘\(value)’."
             case .rpcError(_, let message): return message
             case .authRequired(let message): return message.isEmpty ? "Authentication required. Log in to Antigravity to continue." : message
             case .timedOut(let method): return "ACP \(method) request timed out."
@@ -126,7 +132,7 @@ final class ACPClient {
             let data = handle.availableData
             guard !data.isEmpty, let proc else { return }
             decoder.append(data) { [weak self] decoded in
-                Task { @MainActor in
+                DispatchQueue.main.async {
                     guard let self, self.isCurrentConnection(proc, generation: generation) else { return }
                     self.handleLine(decoded)
                 }
@@ -195,7 +201,7 @@ final class ACPClient {
         failAll(ACPError.notRunning)
     }
 
-    func request(method: String, params: [String: Any] = [:], timeout: TimeInterval? = 30) async throws -> [String: Any] {
+    func request(method: String, params: [String: Any] = [:], timeout: TimeInterval? = 30, beforeQueue: (() throws -> Void)? = nil, onQueued: (() -> Void)? = nil) async throws -> [String: Any] {
         try Task.checkCancellation()
         guard isRunning, let stdin else { throw ACPError.notRunning }
 
@@ -221,13 +227,18 @@ final class ACPClient {
 
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
-                guard !Task.isCancelled else {
-                    continuation.resume(throwing: CancellationError())
+                do {
+                    try Task.checkCancellation()
+                    guard isRunning, self.stdin === stdin else { throw ACPError.notRunning }
+                    try beforeQueue?()
+                } catch {
+                    continuation.resume(throwing: error)
                     return
                 }
                 let timeoutTask = makeTimeoutTask(forKey: idKey, method: method, timeout: timeout)
                 pendingRequests[idKey] = PendingRequest(continuation: continuation, timeoutTask: timeoutTask)
                 writeLine(line, to: stdin, generation: generation)
+                onQueued?()
             }
         }, onCancel: { [weak self] in
             Task { @MainActor in self?.completeRequest(idKey, throwing: CancellationError()) }
@@ -367,11 +378,8 @@ final class ACPClient {
             guard let sessionID = item["sessionId"] as? String else { return nil }
             let itemCWD = item["cwd"] as? String ?? cwd ?? ""
             let title = (item["title"] as? String)?.nonEmptyTrimmed ?? "Untitled"
-            let updated: Date
-            if let str = item["updatedAt"] as? String {
-                updated = formatter.date(from: str) ?? fallbackFormatter.date(from: str) ?? Date()
-            } else {
-                updated = Date()
+            let updated = (item["updatedAt"] as? String).flatMap {
+                formatter.date(from: $0) ?? fallbackFormatter.date(from: $0)
             }
             return ACPSessionSummary(sessionID: sessionID, cwd: itemCWD, title: title, updatedAt: updated)
         }
@@ -381,7 +389,7 @@ final class ACPClient {
         _ = try await request(method: "session/close", params: ["sessionId": sessionID], timeout: 10)
     }
 
-    func prompt(sessionID: String, blocks: [[String: Any]]) async throws -> [String: Any] {
+    func prompt(sessionID: String, blocks: [[String: Any]], beforeQueue: @escaping () throws -> Void, onQueued: @escaping () -> Void) async throws -> [String: Any] {
         // Prompt requests remain open for the full turn; cancellation is done via `session/cancel`.
         try await request(
             method: "session/prompt",
@@ -389,7 +397,9 @@ final class ACPClient {
                 "sessionId": sessionID,
                 "prompt": blocks
             ],
-            timeout: nil
+            timeout: nil,
+            beforeQueue: beforeQueue,
+            onQueued: onQueued
         )
     }
 
@@ -431,7 +441,6 @@ final class ACPClient {
         let method = dict["method"] as? String
         let jsonID = ACPJSONID(dict["id"])
 
-        // 1. Response to one of our outgoing requests (has `id`, no `method`)
         if method == nil, let jsonID {
             if let errorDict = dict["error"] as? [String: Any] {
                 let code = errorDict["code"] as? Int ?? -1
@@ -448,14 +457,12 @@ final class ACPClient {
             return
         }
 
-        // 2. Incoming request from the ACP server (has both `method` and `id`)
         if let method, let jsonID {
             let params = dict["params"] as? [String: Any] ?? [:]
             onRequest?(jsonID, method, params)
             return
         }
 
-        // 3. One-way notification from the ACP server (has `method`, no `id`)
         if let method {
             let params = dict["params"] as? [String: Any] ?? [:]
             onNotification?(method, params)

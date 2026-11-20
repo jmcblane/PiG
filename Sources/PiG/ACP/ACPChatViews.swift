@@ -18,7 +18,6 @@ struct ACPComposerView: View {
     @State private var isFocused = false
     @State private var focusRequest = 0
     @State private var cursorEndRequest = 0
-    @State private var isSubmitting = false
 
     private let shellRadius: CGFloat = 18
 
@@ -33,7 +32,7 @@ struct ACPComposerView: View {
                     onLogin: { model.openAntigravityLoginInTerminal() },
                     onRetry: {
                         Task {
-                            try? await controller.ensureStarted()
+                            await controller.retryLogin()
                         }
                     }
                 )
@@ -41,8 +40,8 @@ struct ACPComposerView: View {
             if let prompt = controller.permissionPrompt {
                 ACPPermissionCard(
                     prompt: prompt,
-                    respond: { controller.respondToPermission(optionID: $0) },
-                    cancel: { controller.cancelPermission() }
+                    respond: { controller.respondToPermission(promptID: prompt.id, optionID: $0) },
+                    cancel: { controller.cancelPermission(promptID: prompt.id) }
                 )
             }
             if !controller.planEntries.isEmpty {
@@ -93,10 +92,10 @@ struct ACPComposerView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: max(entryHeight, AppFonts.scaled(15.5) + 20))
                     ComposerSendButton(
-                        aborting: controller.isWorking,
-                        disabled: isSubmitting || (!controller.isWorking && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && imageAttachments.isEmpty)
+                        aborting: controller.canAbort,
+                        disabled: !controller.canAbort && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && imageAttachments.isEmpty
                     ) {
-                        if controller.isWorking { Task { await controller.abort() } }
+                        if controller.canAbort { controller.abort() }
                         else { submit() }
                     }
                     .padding(.bottom, 1)
@@ -226,31 +225,27 @@ struct ACPComposerView: View {
     }
 
     private func submit() {
-        guard !isSubmitting, !controller.isWorking else { return }
+        guard !controller.isWorking else { return }
+        let submittedDraft = draft
         let normalized = ComposerTokenCodec.normalizeExactReferences(
-            in: draft + " ",
+            in: submittedDraft + " ",
             skills: controller.slashCommands,
             projectPath: controller.projectPath
         ).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty || !imageAttachments.isEmpty else { return }
 
         let submittedImages = imageAttachments
-        draft = ""
-        imageAttachments = []
-        entryHeight = max(36, AppFonts.scaled(15.5) + 20)
         beforeSubmit?()
-
-        isSubmitting = true
         Task {
-            await controller.send(normalized, images: submittedImages)
-            isSubmitting = false
+            await controller.sendDraft(submittedDraft, images: submittedImages, normalizedText: normalized)
         }
     }
 }
 
-/// Toolbar beneath `ACPComposerView`: Antigravity model picker, thinking level, permission mode, and context usage.
 struct ACPComposerToolbar: View {
+    @EnvironmentObject private var model: AppModel
     @ObservedObject var controller: ACPChatController
+    @State private var usageProvider: UsageLimitProvider?
 
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
@@ -266,13 +261,34 @@ struct ACPComposerToolbar: View {
             )
             Spacer(minLength: 8)
             ACPContextUsageBadge(used: controller.contextUsed, window: controller.contextWindow, percent: controller.contextPercent)
+            if let usageProvider {
+                ACPStoredUsageLimitIndicator(store: model.usageLimitStore, provider: usageProvider) {
+                    model.refreshUsageLimit(for: usageProvider)
+                }
+                .frame(width: 84)
+            }
         }
         .padding(.leading, 8)
         .padding(.trailing, 14)
+        .task(id: controller.activeModel) {
+            let provider = UsageLimitProvider.from(model: controller.activeModel)
+            guard !Task.isCancelled else { return }
+            usageProvider = provider
+            model.refreshUsageLimit(for: provider)
+        }
     }
 }
 
-/// Reusable ACP permission mode picker (used both in active ACP chats and on landing when an Antigravity model is selected).
+private struct ACPStoredUsageLimitIndicator: View {
+    @ObservedObject var store: UsageLimitStore
+    let provider: UsageLimitProvider
+    let refresh: () -> Void
+
+    var body: some View {
+        UsageLimitIndicator(snapshot: store.limits[provider], refresh: refresh)
+    }
+}
+
 struct ACPModePicker: View {
     @Environment(\.appTheme) private var appTheme
     let modes: [ACPModeInfo]

@@ -106,6 +106,8 @@ extension AppModel {
         persistACPChats()
 
         let controller = makeACPController(for: record)
+        controller.draft = text
+        controller.draftImages = images
         acpControllers[chatID] = controller
 
         clearAgentSelection()
@@ -120,14 +122,12 @@ extension AppModel {
         if !isQuickChat { touchProject(projectPath) }
         selectedProjectPath = projectPath
         selectedACPChatID = chatID
-        acpUnreadChatIDs.remove(chatID)
+        markSelectedACPChatRead()
         appendInboxID("acp:\(chatID)")
 
         Task { [weak self] in
-            if isQuickChat {
-                try? await AsyncFileSystem.createDirectory(at: PiPaths.quickChatsProject)
-            }
-            await controller.send(text, images: images)
+            guard self?.acpControllers[chatID] === controller else { return }
+            await controller.sendDraft(text, images: images)
             self?.enforceACPSessionUnloadPolicy()
         }
     }
@@ -144,7 +144,7 @@ extension AppModel {
         if !record.isQuickChat { touchProject(record.projectPath) }
         selectedProjectPath = record.projectPath
         selectedACPChatID = chatID
-        acpUnreadChatIDs.remove(chatID)
+        markSelectedACPChatRead()
         appendInboxID("acp:\(chatID)")
 
         let controller: ACPChatController
@@ -161,12 +161,18 @@ extension AppModel {
         }
     }
 
+    func markSelectedACPChatRead() {
+        if let selectedACPChatID, acpUnreadChatIDs.contains(selectedACPChatID) {
+            acpUnreadChatIDs.remove(selectedACPChatID)
+        }
+    }
+
     func openACPSession(_ summary: ACPSessionSummary) {
         if let existing = acpChats.first(where: { $0.sessionID == summary.sessionID }) {
             selectACPChat(existing.id)
             return
         }
-        let now = Date()
+        let updatedAt = summary.updatedAt ?? .distantPast
         let isQuick = isQuickChatsProject(summary.cwd)
         let record = ACPChatRecord(
             id: UUID().uuidString,
@@ -177,8 +183,8 @@ extension AppModel {
             thinkingLevel: defaultThinkingLevel,
             modeID: landingACPModeID,
             isQuickChat: isQuick,
-            created: summary.updatedAt,
-            lastActivity: max(summary.updatedAt, now)
+            created: updatedAt,
+            lastActivity: updatedAt
         )
         acpChats.append(record)
         persistACPChats()
@@ -264,16 +270,17 @@ extension AppModel {
             bySessionID[summary.sessionID] = summary
         }
         for record in acpChats where record.standardizedProjectPath == standardized {
-            if let sid = record.sessionID, bySessionID[sid] == nil {
+            if let sid = record.sessionID,
+               bySessionID[sid]?.updatedAt.map({ $0 >= record.lastActivity }) != true {
                 bySessionID[sid] = ACPSessionSummary(
                     sessionID: sid,
                     cwd: record.projectPath,
                     title: record.title,
-                    updatedAt: record.lastActivity
+                    updatedAt: record.lastActivity == .distantPast ? nil : record.lastActivity
                 )
             }
         }
-        return Array(bySessionID.values.sorted { $0.updatedAt > $1.updatedAt }.prefix(limit))
+        return Array(bySessionID.values.sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }.prefix(limit))
     }
 
     // MARK: - Idle unload policy
@@ -358,7 +365,8 @@ extension AppModel {
             selectedModelID: record.modelID,
             thinkingLevel: record.thinkingLevel,
             modes: antigravityModes,
-            modeID: record.modeID
+            modeID: record.modeID,
+            pendingSelections: record.pendingSelections
         ) { [weak self] event in
             guard let self, let current = self.acpControllers[record.id] else { return }
             self.handleACPEvent(event, controller: current)
@@ -379,12 +387,10 @@ extension AppModel {
         case .metadataChanged:
             if let index = acpChats.firstIndex(where: { $0.id == controller.id }) {
                 acpChats[index].title = controller.title
-                if !controller.selectedModelID.isEmpty {
-                    acpChats[index].modelID = controller.selectedModelID
-                }
+                acpChats[index].modelID = controller.selectedModelID
                 acpChats[index].thinkingLevel = controller.thinkingLevel
                 acpChats[index].modeID = controller.currentModeID
-                acpChats[index].lastActivity = Date()
+                acpChats[index].pendingSelections = controller.pendingSelections
                 persistACPChats()
             }
             objectWillChange.send()
@@ -400,7 +406,9 @@ extension AppModel {
                 acpChats[index].lastActivity = Date()
                 persistACPChats()
             }
-            if selectedACPChatID != controller.id || !NSApp.isActive {
+            if selectedACPChatID == controller.id && NSApp.isActive {
+                markSelectedACPChatRead()
+            } else {
                 acpUnreadChatIDs.insert(controller.id)
                 notifyACPFinished(chatID: controller.id)
             }
