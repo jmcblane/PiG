@@ -25,12 +25,16 @@ struct ComposerToolbar: View {
             if let usageProvider {
                 Group {
                     if usageProvider == .claudeBridge {
-                        UsageLimitIndicator(
-                            snapshot: controller.claudeBridgeUsage ?? UsageLimitSnapshot(serviceName: "Claude Code"),
-                            pendingText: "Waiting for Claude Code quota data…"
-                        ) { }
+                        ClaudeBridgeUsageLimitIndicator(
+                            store: model.usageLimitStore,
+                            liveSnapshot: controller.claudeBridgeUsage
+                        ) {
+                            if PiEnvironment.executable(named: "claude") != nil {
+                                model.refreshUsageLimit(for: .claude, force: true)
+                            }
+                        }
                     } else {
-                        StoredUsageLimitIndicator(store: model.usageLimitStore, provider: usageProvider) { model.refreshUsageLimit(for: usageProvider) }
+                        StoredUsageLimitIndicator(store: model.usageLimitStore, provider: usageProvider) { model.refreshUsageLimit(for: usageProvider, force: true) }
                     }
                 }
                 .frame(width: 84)
@@ -70,6 +74,20 @@ private struct StoredUsageLimitIndicator: View {
 
     var body: some View {
         UsageLimitIndicator(snapshot: store.limits[provider], refresh: refresh)
+    }
+}
+
+private struct ClaudeBridgeUsageLimitIndicator: View {
+    @ObservedObject var store: UsageLimitStore
+    let liveSnapshot: UsageLimitSnapshot?
+    let refresh: () -> Void
+
+    var body: some View {
+        UsageLimitIndicator(
+            snapshot: liveSnapshot ?? store.limits[.claude] ?? UsageLimitSnapshot(serviceName: "Claude Code"),
+            pendingText: "Waiting for Claude Code quota data…",
+            refresh: refresh
+        )
     }
 }
 

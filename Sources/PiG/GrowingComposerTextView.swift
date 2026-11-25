@@ -47,49 +47,74 @@ private extension NSAttributedString.Key {
 private final class ComposerTokenAttachmentCell: NSTextAttachmentCell {
     let token: ComposerToken
     let palette: AppThemePalette
+    private let cachedSize: NSSize
+    private let cachedBaselineOffset: NSPoint
+    private let fillColor: NSColor
+    private let borderColor: NSColor
+    private let dollarAttributes: [NSAttributedString.Key: Any]
+    private let labelAttributes: [NSAttributedString.Key: Any]
+    private let fileIcon: NSImage?
+    private let labelInsetX: CGFloat
+    private let labelInsetY: CGFloat
+    private let labelTrailingInset: CGFloat
+    private let labelHeight: CGFloat
 
     init(token: ComposerToken, palette: AppThemePalette) {
         self.token = token
         self.palette = palette
+        let labelFont = AppFonts.nsUI(13.5, weight: .semibold)
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: labelFont,
+            .foregroundColor: palette.text.nsColor
+        ]
+        self.labelAttributes = labelAttrs
+        self.dollarAttributes = [
+            .font: AppFonts.nsUI(14, weight: .bold),
+            .foregroundColor: palette.accent.nsColor
+        ]
+        self.fillColor = palette.codeBackground.nsColor.withAlphaComponent(0.78)
+        self.borderColor = palette.line.nsColor.withAlphaComponent(0.9)
+        if token.kind == .file {
+            self.fileIcon = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(paletteColors: [palette.accent.nsColor]))
+        } else {
+            self.fileIcon = nil
+        }
+        let labelWidth = (token.label as NSString).size(withAttributes: [.font: labelFont]).width
+        self.cachedSize = NSSize(width: min(AppFonts.scaled(280), ceil(labelWidth + AppFonts.scaled(36))), height: AppFonts.scaled(24))
+        self.cachedBaselineOffset = NSPoint(x: 0, y: -AppFonts.scaled(5))
+        self.labelInsetX = AppFonts.scaled(27)
+        self.labelInsetY = AppFonts.scaled(4)
+        self.labelTrailingInset = AppFonts.scaled(33)
+        self.labelHeight = AppFonts.scaled(17)
         super.init(textCell: token.label)
     }
 
     required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func cellSize() -> NSSize {
-        let labelWidth = (token.label as NSString).size(withAttributes: [.font: AppFonts.nsUI(13.5, weight: .semibold)]).width
-        return NSSize(width: min(AppFonts.scaled(280), ceil(labelWidth + AppFonts.scaled(36))), height: AppFonts.scaled(24))
-    }
+    override func cellSize() -> NSSize { cachedSize }
 
-    override func cellBaselineOffset() -> NSPoint { NSPoint(x: 0, y: -AppFonts.scaled(5)) }
+    override func cellBaselineOffset() -> NSPoint { cachedBaselineOffset }
 
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
         let rect = cellFrame.insetBy(dx: 1, dy: 1)
-        palette.codeBackground.nsColor.withAlphaComponent(0.78).setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
-        palette.line.nsColor.withAlphaComponent(0.9).setStroke()
-        let border = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
-        border.lineWidth = 1
-        border.stroke()
+        let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+        fillColor.setFill()
+        path.fill()
+        borderColor.setStroke()
+        path.lineWidth = 1
+        path.stroke()
 
         if token.kind == .skill {
             ("$" as NSString).draw(
                 in: NSRect(x: rect.minX + 8, y: rect.minY + 3, width: 12, height: 18),
-                withAttributes: [
-                    .font: AppFonts.nsUI(14, weight: .bold),
-                    .foregroundColor: palette.accent.nsColor
-                ]
+                withAttributes: dollarAttributes
             )
-        } else if let image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(paletteColors: [palette.accent.nsColor])) {
+        } else if let image = fileIcon {
             image.draw(in: NSRect(x: rect.minX + 8, y: rect.minY + 5, width: 13, height: 13))
         }
-        let labelAttributes: [NSAttributedString.Key: Any] = [
-            .font: AppFonts.nsUI(13.5, weight: .semibold),
-            .foregroundColor: palette.text.nsColor
-        ]
         (token.label as NSString).draw(
-            in: NSRect(x: rect.minX + AppFonts.scaled(27), y: rect.minY + AppFonts.scaled(4), width: rect.width - AppFonts.scaled(33), height: AppFonts.scaled(17)),
+            in: NSRect(x: rect.minX + labelInsetX, y: rect.minY + labelInsetY, width: rect.width - labelTrailingInset, height: labelHeight),
             withAttributes: labelAttributes
         )
     }
@@ -224,15 +249,24 @@ struct GrowingComposerTextView: NSViewRepresentable {
         context.coordinator.maxHeight = maxHeight
         let themeChanged = context.coordinator.theme != theme
         let styleChanged = context.coordinator.textStyle != TextStyle.current
-        context.coordinator.textStyle = TextStyle.current
-        context.coordinator.theme = theme
-        applyTheme(to: textView)
+        if themeChanged || styleChanged {
+            context.coordinator.textStyle = TextStyle.current
+            context.coordinator.theme = theme
+            context.coordinator.refreshBaseAttributes()
+        }
+        if themeChanged {
+            applyTheme(to: textView)
+        }
         if styleChanged {
             textView.font = AppFonts.nsUI(15.5)
             textView.minSize.height = minHeight
         }
+        let didApplyText: Bool
         if context.coordinator.canonicalText(in: textView) != text || themeChanged || styleChanged {
             context.coordinator.applyCanonicalText(text, to: textView)
+            didApplyText = true
+        } else {
+            didApplyText = false
         }
         if focusRequest > 0, focusRequest != context.coordinator.handledFocusRequest {
             context.coordinator.handledFocusRequest = focusRequest
@@ -250,7 +284,9 @@ struct GrowingComposerTextView: NSViewRepresentable {
                 textView.scrollRangeToVisible(textView.selectedRange())
             }
         }
-        context.coordinator.scheduleRecalculateHeight()
+        if didApplyText || styleChanged {
+            context.coordinator.scheduleRecalculateHeight()
+        }
     }
 
     private func applyTheme(to textView: SubmitTextView) {
@@ -281,6 +317,10 @@ struct GrowingComposerTextView: NSViewRepresentable {
         private var lastDocumentHeight: CGFloat = 0
         private var recalculationScheduled = false
         private var isNormalizingAttributes = false
+        private var wasEmpty = true
+        private var cachedBaseFont: NSFont
+        private var cachedBaseColor: NSColor
+        private var cachedBaseAttributes: [NSAttributedString.Key: Any]
 
         init(
             text: Binding<String>,
@@ -296,6 +336,19 @@ struct GrowingComposerTextView: NSViewRepresentable {
             self.maxHeight = maxHeight
             self.tabCompletion = tabCompletion
             self.theme = theme
+            let font = AppFonts.nsUI(15.5)
+            let color = theme.palette.text.nsColor
+            self.cachedBaseFont = font
+            self.cachedBaseColor = color
+            self.cachedBaseAttributes = [.font: font, .foregroundColor: color]
+        }
+
+        func refreshBaseAttributes() {
+            let font = AppFonts.nsUI(15.5)
+            let color = theme.palette.text.nsColor
+            cachedBaseFont = font
+            cachedBaseColor = color
+            cachedBaseAttributes = [.font: font, .foregroundColor: color]
         }
 
         func textDidChange(_ notification: Notification) {
@@ -303,9 +356,12 @@ struct GrowingComposerTextView: NSViewRepresentable {
                   let textView = notification.object as? NSTextView else { return }
             normalizePlainTextAttributes(in: textView)
             text.wrappedValue = canonicalText(in: textView)
-            textView.needsDisplay = true
+            let isEmpty = textView.string.isEmpty
+            if isEmpty != wasEmpty {
+                wasEmpty = isEmpty
+                textView.needsDisplay = true
+            }
             recalculateHeight(scrollToCursor: true)
-            scheduleRecalculateHeight(scrollToCursor: true)
         }
 
         @discardableResult
@@ -325,29 +381,36 @@ struct GrowingComposerTextView: NSViewRepresentable {
             return true
         }
 
-        private var baseTextAttributes: [NSAttributedString.Key: Any] {
-            [
-                .font: AppFonts.nsUI(15.5),
-                .foregroundColor: theme.palette.text.nsColor
-            ]
+        private func matchesBaseAttributes(_ attributes: [NSAttributedString.Key: Any]) -> Bool {
+            attributes.count == 2
+                && (attributes[.font] as? NSFont) == cachedBaseFont
+                && (attributes[.foregroundColor] as? NSColor) == cachedBaseColor
         }
 
         private func normalizePlainTextAttributes(in textView: NSTextView) {
             guard let storage = textView.textStorage else { return }
-            isNormalizingAttributes = true
-            defer { isNormalizingAttributes = false }
-            storage.beginEditing()
+            var rangesToNormalize: [NSRange] = []
             var index = 0
             while index < storage.length {
                 var range = NSRange()
-                let attachment = storage.attribute(.attachment, at: index, effectiveRange: &range)
-                if attachment == nil {
-                    storage.setAttributes(baseTextAttributes, range: range)
+                let attributes = storage.attributes(at: index, effectiveRange: &range)
+                if attributes[.attachment] == nil, !matchesBaseAttributes(attributes) {
+                    rangesToNormalize.append(range)
                 }
                 index = NSMaxRange(range)
             }
-            storage.endEditing()
-            textView.typingAttributes = baseTextAttributes
+            if !rangesToNormalize.isEmpty {
+                isNormalizingAttributes = true
+                defer { isNormalizingAttributes = false }
+                storage.beginEditing()
+                for range in rangesToNormalize {
+                    storage.setAttributes(cachedBaseAttributes, range: range)
+                }
+                storage.endEditing()
+            }
+            if !matchesBaseAttributes(textView.typingAttributes) {
+                textView.typingAttributes = cachedBaseAttributes
+            }
         }
 
         func canonicalText(in textView: NSTextView) -> String {
@@ -375,22 +438,23 @@ struct GrowingComposerTextView: NSViewRepresentable {
         func applyCanonicalText(_ canonical: String, to textView: NSTextView) {
             let previousSelection = textView.selectedRange()
             let attributed = NSMutableAttributedString()
-            let base = baseTextAttributes
-            for segment in ComposerTokenCodec.segments(in: canonical) {
+            let base = cachedBaseAttributes
+            for segment in ComposerTokenCodec.rawSegments(in: canonical) {
                 switch segment {
                 case .text(let value):
                     attributed.append(NSAttributedString(string: value, attributes: base))
-                case .token(let token):
+                case .token(let token, let rawMarker):
                     let attachment = NSTextAttachment()
                     attachment.attachmentCell = ComposerTokenAttachmentCell(token: token, palette: theme.palette)
                     attributed.append(NSAttributedString(
                         string: "\u{FFFC}",
-                        attributes: [.attachment: attachment, .pigComposerToken: ComposerTokenCodec.marker(for: token)]
+                        attributes: [.attachment: attachment, .pigComposerToken: rawMarker]
                     ))
                 }
             }
             textView.textStorage?.setAttributedString(attributed)
             textView.typingAttributes = base
+            wasEmpty = attributed.length == 0
             let location = min(previousSelection.location, attributed.length)
             textView.setSelectedRange(NSRange(location: location, length: 0))
             textView.needsDisplay = true

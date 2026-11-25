@@ -2,48 +2,121 @@ import SwiftUI
 import AppKit
 import ImageIO
 
+enum UsageLimitStyle {
+    static func meterColor(percent: Int?, role: UsageLimitWindowRole, hasError: Bool = false, theme: AppTheme) -> Color {
+        guard let percent else { return hasError ? theme.danger : theme.muted }
+        if percent <= 10 { return theme.danger }
+        if percent <= 25 { return theme.warning }
+        return baseColor(for: role, theme: theme)
+    }
+
+    static func baseColor(for role: UsageLimitWindowRole, theme: AppTheme) -> Color {
+        switch role {
+        case .primary: return theme.brass
+        case .weekly: return theme.good
+        case .extra: return theme.secondaryText
+        }
+    }
+}
+
 struct UsageLimitIndicator: View {
     @Environment(\.appTheme) private var appTheme
     let snapshot: UsageLimitSnapshot?
     var pendingText = "Loading…"
     let refresh: () -> Void
-    @State private var hovering = false
+    @State private var indicatorHovering = false
+    @State private var popupHovering = false
+    @State private var showPopup = false
+    @State private var hideTask: Task<Void, Never>?
 
     var body: some View {
         Button(action: refresh) {
             VStack(spacing: 3) {
                 SegmentMeter(
                     percent: snapshot?.primary.map { Double($0.remainingPercent) },
-                    fill: usageColor(snapshot?.primary?.remainingPercent, fallback: appTheme.brass),
+                    fill: UsageLimitStyle.meterColor(
+                        percent: snapshot?.primary?.remainingPercent,
+                        role: .primary,
+                        hasError: snapshot?.error != nil,
+                        theme: appTheme
+                    ),
                     empty: emptyTrack(for: snapshot?.primary?.remainingPercent)
                 )
                 SegmentMeter(
                     percent: snapshot?.weekly.map { Double($0.remainingPercent) },
-                    fill: usageColor(snapshot?.weekly?.remainingPercent, fallback: appTheme.good),
+                    fill: UsageLimitStyle.meterColor(
+                        percent: snapshot?.weekly?.remainingPercent,
+                        role: .weekly,
+                        hasError: snapshot?.error != nil,
+                        theme: appTheme
+                    ),
                     empty: emptyTrack(for: snapshot?.weekly?.remainingPercent)
                 )
             }
+            .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Refresh usage limits")
         .accessibilityValue(snapshot?.error ?? snapshot?.details.map { "\($0.label): \($0.remainingPercent)% remaining" }.joined(separator: ", ") ?? pendingText)
         .overlay(alignment: .bottomTrailing) {
-            if hovering {
-                UsageLimitPopup(snapshot: snapshot, pendingText: pendingText)
-                    .offset(y: -16)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            if showPopup {
+                VStack(spacing: 0) {
+                    UsageLimitPopup(
+                        snapshot: snapshot,
+                        pendingText: pendingText,
+                        openUsageSettings: {
+                            dismissPopup()
+                            SettingsTab.open(.usage)
+                        }
+                    )
+                    Color.clear
+                        .frame(height: 8)
+                }
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    popupHovering = inside
+                    updateHoverVisibility()
+                }
+                .offset(y: -15)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        .zIndex(hovering ? 10 : 0)
-        .onHover { hovering = $0 }
+        .zIndex(showPopup ? 10 : 0)
+        .onHover { inside in
+            indicatorHovering = inside
+            updateHoverVisibility()
+        }
+        .onDisappear {
+            hideTask?.cancel()
+            hideTask = nil
+        }
     }
 
-    private func usageColor(_ percent: Int?, fallback: Color) -> Color {
-        guard let percent else { return snapshot?.error == nil ? appTheme.muted : appTheme.danger }
-        if percent <= 10 { return appTheme.danger }
-        if percent <= 25 { return appTheme.brass }
-        return fallback
+    private func updateHoverVisibility() {
+        hideTask?.cancel()
+        hideTask = nil
+        if indicatorHovering || popupHovering {
+            if !showPopup {
+                withAnimation(.easeOut(duration: 0.12)) { showPopup = true }
+            }
+        } else if showPopup {
+            hideTask = Task {
+                try? await Task.sleep(for: .milliseconds(180))
+                guard !Task.isCancelled else { return }
+                if !indicatorHovering && !popupHovering {
+                    withAnimation(.easeOut(duration: 0.12)) { showPopup = false }
+                }
+            }
+        }
+    }
+
+    private func dismissPopup() {
+        hideTask?.cancel()
+        hideTask = nil
+        indicatorHovering = false
+        popupHovering = false
+        showPopup = false
     }
 
     private func emptyTrack(for percent: Int?) -> Color {
@@ -56,20 +129,50 @@ struct UsageLimitPopup: View {
     @Environment(\.appTheme) private var appTheme
     let snapshot: UsageLimitSnapshot?
     var pendingText = "Loading…"
+    var openUsageSettings: (() -> Void)? = nil
+    @State private var shortcutHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("\(snapshot?.serviceName ?? "Usage") usage")
-                .font(AppFonts.ui(11.5, weight: .semibold))
-                .foregroundStyle(appTheme.text)
-            if let snapshot, snapshot.error == nil {
-                ForEach(snapshot.details, id: \.self) { window in
-                    popupRow(window)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text("\(snapshot?.serviceName ?? "Usage") usage")
+                    .font(AppFonts.ui(11.5, weight: .semibold))
+                    .foregroundStyle(appTheme.text)
+                Spacer(minLength: 8)
+                if let openUsageSettings {
+                    Button(action: openUsageSettings) {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(AppFonts.ui(11, weight: .semibold))
+                            .foregroundStyle(shortcutHovering ? appTheme.text : appTheme.muted)
+                            .frame(width: 20, height: 18)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(shortcutHovering ? appTheme.panel2 : .clear)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { shortcutHovering = $0 }
+                    .help("Open all usage in Settings")
+                    .accessibilityLabel("Open all usage in Settings")
                 }
+            }
+            if let snapshot, snapshot.error == nil {
                 if snapshot.details.isEmpty {
                     Text(pendingText)
                         .font(AppFonts.ui(11.5))
                         .foregroundStyle(appTheme.muted)
+                } else {
+                    Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 4) {
+                        ForEach(Array(snapshot.details.enumerated()), id: \.offset) { index, window in
+                            if index > 0 && snapshot.details[index - 1].isActiveGroup && !window.isActiveGroup {
+                                Divider()
+                                    .gridCellUnsizedAxes(.horizontal)
+                                    .padding(.vertical, 2)
+                            }
+                            popupRow(window)
+                        }
+                    }
                 }
             } else {
                 Text(snapshot?.error ?? pendingText)
@@ -81,32 +184,50 @@ struct UsageLimitPopup: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .fixedSize(horizontal: true, vertical: true)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(appTheme.panel.opacity(0.98)))
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(appTheme.panel.opacity(0.98))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(appTheme.line.opacity(0.75), lineWidth: 1)
+                )
+        )
         .shadow(color: Color.black.opacity(0.32), radius: 12, y: 6)
     }
 
     private func popupRow(_ window: UsageLimitWindow) -> some View {
-        HStack(spacing: 8) {
-            Text(window.label)
-                .font(AppFonts.ui(11.5, weight: .semibold))
-                .foregroundStyle(appTheme.muted)
-                .frame(width: 86, alignment: .leading)
+        let color = UsageLimitStyle.meterColor(percent: window.remainingPercent, role: window.role, theme: appTheme)
+        return GridRow {
+            HStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(color)
+                    .frame(width: 10, height: 4)
+                    .opacity(window.isActiveGroup ? 1 : 0.72)
+                Text(window.label)
+                    .font(AppFonts.ui(11.5, weight: window.isActiveGroup ? .semibold : .medium))
+                    .foregroundStyle(window.isActiveGroup ? appTheme.text : appTheme.muted)
+                    .lineLimit(1)
+            }
             Text("\(window.remainingPercent)%")
                 .font(AppFonts.ui(11.5, weight: .semibold))
-                .foregroundStyle(window.remainingPercent <= 10 ? appTheme.danger : window.remainingPercent <= 25 ? appTheme.brass : appTheme.good)
-            Text("resets \(window.resetText)")
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .gridColumnAlignment(.trailing)
+            Text(window.resetText.map { "resets \($0)" } ?? "")
                 .font(AppFonts.ui(11.5))
                 .foregroundStyle(appTheme.secondaryText)
+                .lineLimit(1)
         }
     }
 }
 
 /// 10-block meter for usage remaining.
-private struct SegmentMeter: View {
+struct SegmentMeter: View {
     let percent: Double?
     let fill: Color
     var empty: Color
     var segments: Int = 10
+    var height: CGFloat = 4
 
     var body: some View {
         HStack(spacing: 2) {
@@ -115,7 +236,7 @@ private struct SegmentMeter: View {
                     .fill(index < litCount ? fill : empty)
             }
         }
-        .frame(height: 4)
+        .frame(height: height)
     }
 
     private var litCount: Int {

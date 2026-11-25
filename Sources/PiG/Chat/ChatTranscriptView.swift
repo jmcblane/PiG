@@ -693,7 +693,7 @@ private struct TranscriptToolPresentation {
             }
             if groupedMessageIDs.contains(message.id) { continue }
             if Self.hasVisibleContent(message, showThinkingTraces: showThinkingTraces) {
-                items.append(.message(message))
+                items.append(.message(message, showsActivityIndicator: segmentByMessageID[message.id] == activeSegment))
             } else if userTools.isEmpty {
                 items.append(.anchor(message.id))
             }

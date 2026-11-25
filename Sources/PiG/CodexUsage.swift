@@ -1,9 +1,19 @@
 import Foundation
 
+enum UsageLimitWindowRole: Hashable {
+    case primary
+    case weekly
+    case extra
+}
+
 struct UsageLimitWindow: Hashable {
     var label: String
     var remainingPercent: Int
-    var resetText: String
+    var resetText: String?
+    var role: UsageLimitWindowRole = .primary
+    var groupName: String? = nil
+    var groupSubtitle: String? = nil
+    var isActiveGroup: Bool = true
 }
 
 struct UsageLimitSnapshot: Hashable {
@@ -21,11 +31,30 @@ enum UsageLimitProvider: Hashable {
     case grok
     case antigravity(String)
 
+    static let antigravityOverview = UsageLimitProvider.antigravity("")
+
     var serviceName: String {
         switch self {
         case .codex: return "Codex"
         case .claude, .claudeBridge: return "Claude Code"
         case .grok: return "Grok"
+        case .antigravity: return ACPProvider.antigravityDisplayName
+        }
+    }
+
+    var accountSubtitle: String? {
+        switch self {
+        case .codex(let key): return key
+        case .claudeBridge: return "Reported by active chat"
+        case .claude, .grok, .antigravity: return nil
+        }
+    }
+
+    var colorKey: String {
+        switch self {
+        case .codex(let key): return key
+        case .claude, .claudeBridge: return "anthropic"
+        case .grok: return "xai"
         case .antigravity: return ACPProvider.antigravityDisplayName
         }
     }
@@ -54,17 +83,61 @@ enum UsageLimitProvider: Hashable {
         if kind == .claude && PiEnvironment.executable(named: "claude") == nil { return nil }
         return kind
     }
+
+    static func configuredAccounts(
+        authEntries: [String: Any]? = nil,
+        claudeInstalled: Bool? = nil,
+        antigravityInstalled: Bool? = nil,
+        includeClaudeBridge: Bool = false
+    ) -> [UsageLimitProvider] {
+        let entries = authEntries ?? (try? UsageLimitHelpers.authEntries()) ?? [:]
+        let hasClaudeCLI = claudeInstalled ?? (PiEnvironment.executable(named: "claude") != nil)
+        let hasAntigravity = antigravityInstalled ?? ACPPaths.isAntigravityInstalled
+
+        func isValidOAuth(_ entry: Any?) -> [String: Any]? {
+            guard let dict = entry as? [String: Any],
+                  (dict["type"] as? String)?.lowercased() == "oauth",
+                  let access = dict["access"] as? String, !access.isEmpty else { return nil }
+            return dict
+        }
+
+        var providers: [UsageLimitProvider] = []
+        if hasAntigravity {
+            providers.append(.antigravityOverview)
+        }
+
+        let codexKeys = entries.keys.sorted().filter { key in
+            let lower = key.lowercased()
+            guard lower.contains("openai") || lower.contains("codex"),
+                  let dict = isValidOAuth(entries[key]),
+                  let account = dict["accountId"] as? String, !account.isEmpty else { return false }
+            return true
+        }
+        providers.append(contentsOf: codexKeys.map { .codex($0) })
+
+        if hasClaudeCLI {
+            providers.append(.claude)
+        } else if includeClaudeBridge {
+            providers.append(.claudeBridge)
+        }
+
+        if isValidOAuth(entries["xai"]) != nil {
+            providers.append(.grok)
+        }
+
+        return providers
+    }
 }
 
 enum UsageLimitService {
-    static func fetch(_ provider: UsageLimitProvider) async -> UsageLimitSnapshot {
+    static func fetch(_ provider: UsageLimitProvider, forceRefresh: Bool = false) async -> UsageLimitSnapshot {
         do {
             switch provider {
             case .codex(let key): return try await CodexUsageService.fetch(provider: key)
             case .claude: return try await ClaudeUsageService.fetch()
             case .claudeBridge: return UsageLimitSnapshot(serviceName: provider.serviceName)
             case .grok: return try await GrokUsageService.fetch()
-            case .antigravity(let modelName): return try await AntigravityUsageService.fetch(modelName: modelName)
+            case .antigravity(let modelName): return try await AntigravityUsageService.fetch(modelName: modelName, forceRefresh: forceRefresh)
             }
         } catch {
             return UsageLimitSnapshot(serviceName: provider.serviceName, error: error.localizedDescription)
@@ -117,7 +190,12 @@ enum CodexUsageService {
         let used = UsageLimitHelpers.clamp(Int((window.usedPercent ?? 0).rounded()), 0, 100)
         return FormattedWindow(
             kind: kind,
-            window: UsageLimitWindow(label: label, remainingPercent: 100 - used, resetText: "in \(UsageLimitHelpers.formatDuration(window.resetAfterSeconds ?? secondsUntil(window.resetAt)))")
+            window: UsageLimitWindow(
+                label: label,
+                remainingPercent: 100 - used,
+                resetText: "in \(UsageLimitHelpers.formatDuration(window.resetAfterSeconds ?? secondsUntil(window.resetAt)))",
+                role: kind == .weekly ? .weekly : .primary
+            )
         )
     }
 
@@ -133,25 +211,26 @@ enum ClaudeBridgeUsageService {
     static func snapshot(from text: String) -> UsageLimitSnapshot? {
         guard let data = text.data(using: .utf8),
               let headers = try? JSONDecoder().decode([String: String].self, from: data) else { return nil }
-        func window(_ key: String, label: String) -> UsageLimitWindow? {
+        func window(_ key: String, label: String, role: UsageLimitWindowRole) -> UsageLimitWindow? {
             guard let raw = headers["\(key)-utilization"],
                   let used = Double(raw), used.isFinite else { return nil }
             let reset = headers["\(key)-reset"].flatMap(Double.init)
-            let resetText: String
+            let resetText: String?
             if let reset, reset.isFinite {
                 resetText = "in \(UsageLimitHelpers.formatDuration(max(0, reset - Date().timeIntervalSince1970)))"
             } else {
-                resetText = "unknown"
+                resetText = nil
             }
             return UsageLimitWindow(
                 label: label,
                 remainingPercent: Int(((1 - min(1, max(0, used))) * 100).rounded()),
-                resetText: resetText
+                resetText: resetText,
+                role: role
             )
         }
-        let primary = window("5h", label: "5h")
-        let weekly = window("7d", label: "Weekly")
-        let extra = window("7d_oi", label: "Weekly (extra)")
+        let primary = window("5h", label: "5h", role: .primary)
+        let weekly = window("7d", label: "Weekly", role: .weekly)
+        let extra = window("7d_oi", label: "Weekly (extra)", role: .extra)
         let details = [primary, weekly, extra].compactMap { $0 }
         guard !details.isEmpty else { return nil }
         return UsageLimitSnapshot(serviceName: "Claude Code", primary: primary, weekly: weekly, details: details)
@@ -160,7 +239,11 @@ enum ClaudeBridgeUsageService {
 
 enum ClaudeUsageService {
     static func fetch() async throws -> UsageLimitSnapshot {
-        let windows = parseWindows(from: try await runUsageCommand())
+        try parseSnapshot(from: try await runUsageCommand())
+    }
+
+    static func parseSnapshot(from text: String) throws -> UsageLimitSnapshot {
+        let windows = parseWindows(from: text)
         guard !windows.isEmpty else { throw FetchError.invalidResponse("Claude") }
         return UsageLimitSnapshot(
             serviceName: UsageLimitProvider.claude.serviceName,
@@ -189,11 +272,39 @@ enum ClaudeUsageService {
         }.value
     }
 
-    private enum ClaudeWindowKind { case session, weeklyAllModels, weeklyModel, other }
+    private enum ClaudeWindowKind {
+        case session, weeklyAllModels, weeklyModel, other
+
+        var sortRank: Int {
+            switch self {
+            case .session: return 0
+            case .weeklyAllModels: return 1
+            case .weeklyModel: return 2
+            case .other: return 3
+            }
+        }
+
+        var role: UsageLimitWindowRole {
+            switch self {
+            case .session: return .primary
+            case .weeklyAllModels, .weeklyModel: return .weekly
+            case .other: return .extra
+            }
+        }
+    }
     private struct ParsedClaudeWindow { var kind: ClaudeWindowKind; var window: UsageLimitWindow }
 
     private static func parseWindows(from text: String) -> [ParsedClaudeWindow] {
-        text.split(whereSeparator: \.isNewline).compactMap { parseLine(String($0)) }
+        text.split(whereSeparator: \.isNewline)
+            .compactMap { parseLine(String($0)) }
+            .enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.kind.sortRank != rhs.element.kind.sortRank {
+                    return lhs.element.kind.sortRank < rhs.element.kind.sortRank
+                }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 
     private static func parseLine(_ line: String) -> ParsedClaudeWindow? {
@@ -219,7 +330,12 @@ enum ClaudeUsageService {
 
         return ParsedClaudeWindow(
             kind: kind,
-            window: UsageLimitWindow(label: label, remainingPercent: 100 - UsageLimitHelpers.clamp(Int(used.rounded()), 0, 100), resetText: resetText(in: line))
+            window: UsageLimitWindow(
+                label: label,
+                remainingPercent: 100 - UsageLimitHelpers.clamp(Int(used.rounded()), 0, 100),
+                resetText: resetText(in: line),
+                role: kind.role
+            )
         )
     }
 
@@ -230,13 +346,13 @@ enum ClaudeUsageService {
         return Double(number)
     }
 
-    private static func resetText(in line: String) -> String {
-        guard let range = line.range(of: "resets ") else { return "unknown" }
+    private static func resetText(in line: String) -> String? {
+        guard let range = line.range(of: "resets ") else { return nil }
         var text = String(line[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         if let paren = text.range(of: "(") {
             text = String(text[..<paren.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        return text.isEmpty ? "unknown" : text
+        return text.isEmpty ? nil : text
     }
 
     private static func textBetween(_ text: String, _ start: Character, _ end: Character) -> String? {
@@ -248,19 +364,46 @@ enum ClaudeUsageService {
 // `agy -p /usage` reports quota per model group, each with 5-hour and weekly buckets.
 // One fetch serves every model for a minute; the selected model picks its group.
 enum AntigravityUsageService {
-    static func fetch(modelName: String) async throws -> UsageLimitSnapshot {
-        let groups = try await cache.groups()
+    static func fetch(modelName: String, forceRefresh: Bool = false) async throws -> UsageLimitSnapshot {
+        let groups = try await cache.groups(forceRefresh: forceRefresh)
         guard !groups.isEmpty else { throw FetchError.invalidResponse(ACPProvider.antigravityDisplayName) }
-        let selected = group(for: modelName, in: groups)
-        let ordered = [selected] + groups.filter { $0.name != selected.name }
+        return makeSnapshot(groups: groups, modelName: modelName)
+    }
+
+    static func makeSnapshot(groups: [AntigravityUsageGroup], modelName: String) -> UsageLimitSnapshot {
+        let trimmedModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isOverview = trimmedModel.isEmpty
+        let selected = isOverview ? groups[0] : group(for: trimmedModel, in: groups)
+        let ordered = isOverview ? groups : ([selected] + groups.filter { $0.name != selected.name })
         return UsageLimitSnapshot(
             serviceName: ACPProvider.antigravityDisplayName,
-            primary: window(selected, kind: "5h", label: "5h"),
-            weekly: window(selected, kind: "weekly", label: "Weekly"),
+            primary: window(selected, kind: "5h", label: "5h", role: .primary),
+            weekly: window(selected, kind: "weekly", label: "Weekly", role: .weekly),
             details: ordered.flatMap { group in
-                group.buckets.compactMap { bucket in
-                    let kind = bucket.window == "5h" ? "5h" : "Weekly"
-                    return window(bucket, label: "\(group.name) · \(kind)")
+                let isActive = isOverview || group.name == selected.name
+                let subtitle = memberSubtitle(group)
+                return sortedBuckets(group.buckets).compactMap { bucket in
+                    let normalized = bucket.window?.lowercased()
+                    let kindLabel: String
+                    let role: UsageLimitWindowRole
+                    if normalized == "5h" {
+                        kindLabel = "5h"
+                        role = .primary
+                    } else if normalized == "weekly" {
+                        kindLabel = "Weekly"
+                        role = .weekly
+                    } else {
+                        kindLabel = bucket.window?.nonEmptyTrimmed ?? "Limit"
+                        role = .extra
+                    }
+                    return window(
+                        bucket,
+                        label: "\(group.name) · \(kindLabel)",
+                        role: role,
+                        groupName: group.name,
+                        groupSubtitle: subtitle,
+                        isActiveGroup: isActive
+                    )
                 }
             }
         )
@@ -273,8 +416,8 @@ enum AntigravityUsageService {
         private var fetchedAt: Date?
         private var inFlight: Task<[AntigravityUsageGroup], Error>?
 
-        func groups() async throws -> [AntigravityUsageGroup] {
-            if let cached, let fetchedAt, Date().timeIntervalSince(fetchedAt) < 60 { return cached }
+        func groups(forceRefresh: Bool) async throws -> [AntigravityUsageGroup] {
+            if !forceRefresh, let cached, let fetchedAt, Date().timeIntervalSince(fetchedAt) < 60 { return cached }
             if let inFlight { return try await inFlight.value }
             let task = Task.detached(priority: .utility) { try AntigravityUsageService.runUsageCommand() }
             inFlight = task
@@ -283,6 +426,25 @@ enum AntigravityUsageService {
             cached = groups
             fetchedAt = Date()
             return groups
+        }
+    }
+
+    private static func sortedBuckets(_ buckets: [AntigravityUsageBucket]) -> [AntigravityUsageBucket] {
+        buckets.enumerated()
+            .sorted { lhs, rhs in
+                let lhsRank = bucketRank(lhs.element.window)
+                let rhsRank = bucketRank(rhs.element.window)
+                if lhsRank != rhsRank { return lhsRank < rhsRank }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+    }
+
+    private static func bucketRank(_ window: String?) -> Int {
+        switch window?.lowercased() {
+        case "5h": return 0
+        case "weekly": return 1
+        default: return 2
         }
     }
 
@@ -315,27 +477,47 @@ enum AntigravityUsageService {
     }
 
     private static func memberNames(_ group: AntigravityUsageGroup) -> [String] {
+        rawMemberNames(group).map { $0.lowercased() }
+    }
+
+    private static func memberSubtitle(_ group: AntigravityUsageGroup) -> String? {
+        let names = rawMemberNames(group)
+        return names.isEmpty ? nil : names.joined(separator: ", ")
+    }
+
+    private static func rawMemberNames(_ group: AntigravityUsageGroup) -> [String] {
         guard let description = group.description,
               let range = description.range(of: "Models within this group:", options: .caseInsensitive) else { return [] }
         return description[range.upperBound...]
             .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "."))).lowercased() }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "."))) }
             .filter { !$0.isEmpty }
     }
 
-    private static func window(_ group: AntigravityUsageGroup, kind: String, label: String) -> UsageLimitWindow? {
-        group.buckets.first { $0.window == kind }.flatMap { window($0, label: label) }
+    private static func window(_ group: AntigravityUsageGroup, kind: String, label: String, role: UsageLimitWindowRole) -> UsageLimitWindow? {
+        group.buckets.first { $0.window?.lowercased() == kind }.flatMap { window($0, label: label, role: role) }
     }
 
-    private static func window(_ bucket: AntigravityUsageBucket, label: String) -> UsageLimitWindow? {
+    private static func window(
+        _ bucket: AntigravityUsageBucket,
+        label: String,
+        role: UsageLimitWindowRole,
+        groupName: String? = nil,
+        groupSubtitle: String? = nil,
+        isActiveGroup: Bool = true
+    ) -> UsageLimitWindow? {
         guard let fraction = bucket.remainingFraction, fraction.isFinite else { return nil }
         let resetText = bucket.resetTime
             .flatMap { ISO8601DateFormatter().date(from: $0) }
-            .map { "in \(UsageLimitHelpers.formatDuration($0.timeIntervalSinceNow))" } ?? "unknown"
+            .map { "in \(UsageLimitHelpers.formatDuration($0.timeIntervalSinceNow))" }
         return UsageLimitWindow(
             label: label,
             remainingPercent: UsageLimitHelpers.clamp(Int((fraction * 100).rounded()), 0, 100),
-            resetText: resetText
+            resetText: resetText,
+            role: role,
+            groupName: groupName,
+            groupSubtitle: groupSubtitle,
+            isActiveGroup: isActiveGroup
         )
     }
 }
@@ -353,19 +535,34 @@ enum GrokUsageService {
         let (data, response) = try await URLSession.shared.data(for: request)
         try UsageLimitHelpers.checkHTTP(response, service: "Grok", authRejected: .grokAuthRejected)
 
+        return try parseSnapshot(from: data)
+    }
+
+    static func parseSnapshot(from data: Data, now: Date = Date()) throws -> UsageLimitSnapshot {
         let decoded = try JSONDecoder().decode(GrokBillingResponse.self, from: data)
-        guard let config = decoded.config, let usedPercent = config.creditUsagePercent else { throw FetchError.invalidGrokUsage }
-        let weekly = UsageLimitWindow(
-            label: "Weekly",
+        guard let config = decoded.config else { throw FetchError.invalidGrokUsage }
+        let resetISO = config.currentPeriod?.end ?? config.billingPeriodEnd
+        // Proto3 JSON omits scalar numeric fields when 0 (e.g. 0% credit usage).
+        guard config.creditUsagePercent != nil || config.currentPeriod != nil || resetISO != nil else {
+            throw FetchError.invalidGrokUsage
+        }
+        let usedPercent = config.creditUsagePercent ?? 0
+        let periodLabel = config.currentPeriod?.type?.uppercased().contains("MONTHLY") == true ? "Monthly" : "Weekly"
+        let resetText = resetISO
+            .flatMap(parseISO8601)
+            .map { "in \(UsageLimitHelpers.formatDuration(max(0, $0.timeIntervalSince(now))))" }
+        let primary = UsageLimitWindow(
+            label: periodLabel,
             remainingPercent: UsageLimitHelpers.clamp(100 - Int(usedPercent.rounded()), 0, 100),
-            resetText: "in \(UsageLimitHelpers.formatDuration(secondsUntil(config.currentPeriod?.end ?? config.billingPeriodEnd)))"
+            resetText: resetText,
+            role: .primary
         )
-        let extra = extraWindow(cap: config.onDemandCap?.val, used: config.onDemandUsed?.val, reset: config.currentPeriod?.end ?? config.billingPeriodEnd)
+        let extra = extraWindow(cap: config.onDemandCap?.val, used: config.onDemandUsed?.val, resetText: resetText)
         return UsageLimitSnapshot(
             serviceName: UsageLimitProvider.grok.serviceName,
-            primary: weekly,
+            primary: primary,
             weekly: extra,
-            details: [weekly, extra].compactMap { $0 }
+            details: [primary, extra].compactMap { $0 }
         )
     }
 
@@ -378,19 +575,15 @@ enum GrokUsageService {
         return access
     }
 
-    private static func extraWindow(cap: Double?, used: Double?, reset: String?) -> UsageLimitWindow? {
+    private static func extraWindow(cap: Double?, used: Double?, resetText: String?) -> UsageLimitWindow? {
         guard let cap, cap > 0 else { return nil }
         let usedPercent = ((used ?? 0) / cap) * 100
         return UsageLimitWindow(
             label: "Extra",
             remainingPercent: UsageLimitHelpers.clamp(100 - Int(usedPercent.rounded()), 0, 100),
-            resetText: "in \(UsageLimitHelpers.formatDuration(secondsUntil(reset)))"
+            resetText: resetText,
+            role: .weekly
         )
-    }
-
-    private static func secondsUntil(_ isoDate: String?) -> Double {
-        guard let isoDate, let date = parseISO8601(isoDate) else { return 0 }
-        return max(0, date.timeIntervalSinceNow)
     }
 
     private static func parseISO8601(_ text: String) -> Date? {
@@ -486,13 +679,13 @@ private struct AntigravityUsageResponse: Decodable {
     }
 }
 
-private struct AntigravityUsageGroup: Decodable {
+struct AntigravityUsageGroup: Decodable {
     var name: String
     var description: String?
     var buckets: [AntigravityUsageBucket]
 }
 
-private struct AntigravityUsageBucket: Decodable {
+struct AntigravityUsageBucket: Decodable {
     var window: String?
     var remainingFraction: Double?
     var resetTime: String?
@@ -517,6 +710,7 @@ private struct GrokBillingConfig: Decodable {
 }
 
 private struct GrokBillingPeriod: Decodable {
+    var type: String?
     var end: String?
 }
 

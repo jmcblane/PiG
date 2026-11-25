@@ -5,6 +5,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case general
     case models
     case agents
+    case usage
     case pi
     case extensions
 
@@ -17,6 +18,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: return "General"
         case .models: return "Models"
         case .agents: return "Agents"
+        case .usage: return "Usage"
         case .pi: return "Pi"
         case .extensions: return "Extensions"
         }
@@ -27,6 +29,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: return "gearshape"
         case .models: return "cpu"
         case .agents: return "person.2"
+        case .usage: return "gauge.with.dots.needle.67percent"
         case .pi: return "shippingbox"
         case .extensions: return "puzzlepiece.extension"
         }
@@ -101,6 +104,7 @@ struct SettingsWindowView: View {
         case .general: GeneralSettingsView()
         case .models: ModelsSettingsView()
         case .agents: AgentsSettingsView()
+        case .usage: UsageSettingsView()
         case .pi: PiSettingsView()
         case .extensions: PiResourcesView()
         }

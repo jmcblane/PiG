@@ -562,7 +562,7 @@ private struct NewChatHomeView: View {
                 imageAttachments: $landingDraft.images,
                 beforeSubmit: { model.activateLandingDraft(controller) },
                 focusOnAppear: true,
-                showsLandingResources: activeProjectPath != nil
+                showsLandingResources: isQuickChatSelected || activeProjectPath != nil
             )
         } else {
             SignalMarchLoadingLabel(text: "Loading composer…")

@@ -56,6 +56,7 @@ enum ComposerCompletion {
     }
 
     static func skillSuggestions(for canonicalText: String, commands: [SlashCommandInfo], limit: Int = 9) -> [ComposerSkillSuggestion] {
+        guard canonicalText.contains("$") else { return [] }
         let text = ComposerTokenCodec.editingString(from: canonicalText)
         let range = NSRange(location: (text as NSString).length, length: 0)
         guard let context = skillContext(for: text, selectedRange: range) else { return [] }
@@ -97,6 +98,7 @@ enum ComposerCompletion {
     /// Cheap check for an `@` file token at the end of the draft, used to
     /// skip the background scan entirely when there is nothing to complete.
     static func hasFileToken(in canonicalText: String) -> Bool {
+        guard canonicalText.contains("@") else { return false }
         let text = ComposerTokenCodec.editingString(from: canonicalText)
         let range = NSRange(location: (text as NSString).length, length: 0)
         return fileContext(for: text, selectedRange: range) != nil

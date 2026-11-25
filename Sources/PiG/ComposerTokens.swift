@@ -42,12 +42,19 @@ enum ComposerTokenSegment {
     case token(ComposerToken)
 }
 
+enum ComposerRawSegment {
+    case text(String)
+    case token(ComposerToken, rawMarker: String)
+}
+
 enum ComposerTokenCodec {
     private static let start = "\u{E000}pig-token:"
     private static let end = "\u{E001}"
 
     static func marker(for token: ComposerToken) -> String {
-        guard let data = try? JSONEncoder().encode(token) else { return token.plainText }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(token) else { return token.plainText }
         return start + data.base64EncodedString() + end
     }
 
@@ -55,14 +62,23 @@ enum ComposerTokenCodec {
         components(in: text).map { component in
             switch component {
             case .text(let value): return .text(value)
-            case .token(let token): return .token(token)
+            case .token(let token, _): return .token(token)
+            }
+        }
+    }
+
+    static func rawSegments(in text: String) -> [ComposerRawSegment] {
+        components(in: text).map { component in
+            switch component {
+            case .text(let value): return .text(value)
+            case .token(let token, let rawMarker): return .token(token, rawMarker: rawMarker)
             }
         }
     }
 
     static func tokens(in text: String) -> [ComposerToken] {
         components(in: text).compactMap { component in
-            if case .token(let token) = component { return token }
+            if case .token(let token, _) = component { return token }
             return nil
         }
     }
@@ -83,7 +99,7 @@ enum ComposerTokenCodec {
             switch component {
             case .text(let value):
                 result += value
-            case .token(let token):
+            case .token(let token, _):
                 result += token.plainText
                 guard index + 1 < parts.count else { continue }
                 switch parts[index + 1] {
@@ -138,28 +154,38 @@ enum ComposerTokenCodec {
         projectPath: String
     ) -> String {
         var result = text
-        let skillByName = Dictionary(uniqueKeysWithValues: skills.filter { $0.source == "skill" }.map { command in
-            (skillDisplayName(command).lowercased(), command)
-        })
-
-        result = replaceRawReferences(in: result, prefix: "$", resolver: { raw in
-            guard let command = skillByName[raw.lowercased()] else { return nil }
-            return ComposerToken(
-                kind: .skill,
-                value: command.name,
-                label: skillDisplayName(command),
-                detail: command.description.nonEmptyTrimmed,
-                resourcePath: command.path
+        // Base64 payloads and token delimiters never contain `$` or `@`, so we
+        // can skip scanning and decoding tokens altogether when absent.
+        if result.contains("$") {
+            let skillByName = Dictionary(
+                skills.filter { $0.source == "skill" }.map { command in
+                    (skillDisplayName(command).lowercased(), command)
+                },
+                uniquingKeysWith: { first, _ in first }
             )
-        })
+            if !skillByName.isEmpty {
+                result = replaceRawReferences(in: result, prefix: "$", resolver: { raw in
+                    guard let command = skillByName[raw.lowercased()] else { return nil }
+                    return ComposerToken(
+                        kind: .skill,
+                        value: command.name,
+                        label: skillDisplayName(command),
+                        detail: command.description.nonEmptyTrimmed,
+                        resourcePath: command.path
+                    )
+                })
+            }
+        }
 
-        let root = URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL
-        result = replaceRawReferences(in: result, prefix: "@", preferLongest: true) { raw in
-            let clean = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-            guard !clean.isEmpty, !clean.hasPrefix("/") else { return nil }
-            let url = root.appendingPathComponent(clean).standardizedFileURL
-            guard url.path.hasPrefix(root.path + "/"), FileManager.default.fileExists(atPath: url.path) else { return nil }
-            return ComposerToken(kind: .file, value: clean, label: url.lastPathComponent, detail: clean, resourcePath: nil)
+        if result.contains("@") {
+            let root = URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL
+            result = replaceRawReferences(in: result, prefix: "@", preferLongest: true) { raw in
+                let clean = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                guard !clean.isEmpty, !clean.hasPrefix("/") else { return nil }
+                let url = root.appendingPathComponent(clean).standardizedFileURL
+                guard url.path.hasPrefix(root.path + "/"), FileManager.default.fileExists(atPath: url.path) else { return nil }
+                return ComposerToken(kind: .file, value: clean, label: url.lastPathComponent, detail: clean, resourcePath: nil)
+            }
         }
         return result
     }
@@ -170,12 +196,12 @@ enum ComposerTokenCodec {
 
     private enum Component {
         case text(String)
-        case token(ComposerToken)
+        case token(ComposerToken, rawMarker: String)
 
         var canonicalLength: Int {
             switch self {
             case .text(let value): return (value as NSString).length
-            case .token(let token): return (ComposerTokenCodec.marker(for: token) as NSString).length
+            case .token(_, let rawMarker): return (rawMarker as NSString).length
             }
         }
 
@@ -197,11 +223,12 @@ enum ComposerTokenCodec {
                 result.append(.text(String(text[startRange.lowerBound...])))
                 return result
             }
+            let rawMarker = String(text[startRange.lowerBound..<endRange.upperBound])
             let encoded = String(text[startRange.upperBound..<endRange.lowerBound])
             if let data = Data(base64Encoded: encoded), let token = try? JSONDecoder().decode(ComposerToken.self, from: data) {
-                result.append(.token(token))
+                result.append(.token(token, rawMarker: rawMarker))
             } else {
-                result.append(.text(String(text[startRange.lowerBound..<endRange.upperBound])))
+                result.append(.text(rawMarker))
             }
             cursor = endRange.upperBound
         }
@@ -215,14 +242,16 @@ enum ComposerTokenCodec {
         preferLongest: Bool = false,
         resolver: (String) -> ComposerToken?
     ) -> String {
+        guard text.contains(prefix) else { return text }
         // Work on plain segments only so existing tokens, escaped references, and code stay untouched.
         var output = ""
         for component in components(in: text) {
-            guard case .text(let segment) = component else {
-                if case .token(let token) = component { output += marker(for: token) }
-                continue
+            switch component {
+            case .token(_, let rawMarker):
+                output += rawMarker
+            case .text(let segment):
+                output += replaceRawReferences(inPlainText: segment, prefix: prefix, preferLongest: preferLongest, resolver: resolver)
             }
-            output += replaceRawReferences(inPlainText: segment, prefix: prefix, preferLongest: preferLongest, resolver: resolver)
         }
         return output
     }

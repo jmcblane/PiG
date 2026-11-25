@@ -125,6 +125,7 @@ struct ACPComposerView: View {
         .onChange(of: draft) { _, value in
             suggestionsDismissed = false
             suggestionIndex = 0
+            guard value.contains("$") || value.contains("@") else { return }
             let normalized = ComposerTokenCodec.normalizeExactReferences(
                 in: value,
                 skills: controller.slashCommands,
@@ -225,7 +226,7 @@ struct ACPComposerView: View {
     }
 
     private func submit() {
-        guard !controller.isWorking else { return }
+        guard !controller.isWorking || controller.canSteer else { return }
         let submittedDraft = draft
         let normalized = ComposerTokenCodec.normalizeExactReferences(
             in: submittedDraft + " ",
@@ -263,7 +264,7 @@ struct ACPComposerToolbar: View {
             ACPContextUsageBadge(used: controller.contextUsed, window: controller.contextWindow, percent: controller.contextPercent)
             if let usageProvider {
                 ACPStoredUsageLimitIndicator(store: model.usageLimitStore, provider: usageProvider) {
-                    model.refreshUsageLimit(for: usageProvider)
+                    model.refreshUsageLimit(for: usageProvider, force: true)
                 }
                 .frame(width: 84)
             }

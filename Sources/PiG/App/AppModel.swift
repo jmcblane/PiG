@@ -206,7 +206,10 @@ final class AppModel: ObservableObject {
     var usageLimitTask: Task<Void, Never>?
     var usageLimitActivationObserver: NSObjectProtocol?
     var usageLimitDeactivationObserver: NSObjectProtocol?
-    var usageLimitFetchDates: [UsageLimitProvider: Date] = [:]
+    var usageLimitFetchDates: [UsageLimitProvider: Date] {
+        get { usageLimitStore.fetchDates }
+        set { usageLimitStore.fetchDates = newValue }
+    }
     var sessionUnloadTask: Task<Void, Never>?
 
     let idleUnloadInterval: TimeInterval = 30 * 60

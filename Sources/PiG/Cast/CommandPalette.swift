@@ -543,6 +543,7 @@ struct CommandPalette: View {
         add("terminal-horizontal", "Horizontal Terminal Split", "rectangle.split.1x2", shortcut: "⇧⌘D") { post(.pigShowHorizontalTerminalSplit) }
         add("terminal-tab", "New Terminal Tab", "plus.rectangle") { post(.pigNewTerminalTab) }
         add("resources", "Extensions & Resources", "puzzlepiece.extension", keywords: "skills") { SettingsTab.open(.extensions) }
+        add("usage", "Usage Limits", "gauge.with.dots.needle.67percent", keywords: "quota account limits") { SettingsTab.open(.usage) }
         add("thinking-traces", model.showThinkingTraces ? "Hide Thinking Traces" : "Show Thinking Traces", "text.bubble") {
             model.showThinkingTraces.toggle()
         }

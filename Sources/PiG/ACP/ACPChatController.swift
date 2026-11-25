@@ -72,6 +72,7 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
     var permissionPrompt: ACPPermissionPrompt? { permissionPrompts.first }
     var hasLiveWork: Bool { isWorking || permissionPrompt != nil }
     var canAbort: Bool { isWorking || isStarting }
+    var canSteer: Bool { serverConfig.isAntigravity && promptQueued && !isCancellingPrompt && isSessionReady }
     var supportsImages: Bool { capabilities.supportsImages }
     var activeModel: ModelInfo? { models.first { $0.id == selectedModelID } }
 
@@ -325,7 +326,9 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
     @discardableResult
     func send(_ text: String, images: [ImageAttachment] = [], onQueued: @escaping () -> Void = {}) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !images.isEmpty, promptID == nil else { return false }
+        guard !trimmed.isEmpty || !images.isEmpty else { return false }
+        let steering = promptID != nil
+        guard !steering || canSteer else { return false }
 
         errorText = nil
         dismissedErrorToast = nil
@@ -335,19 +338,23 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
         let id = UUID()
         promptID = id
         isWorking = true
-        isThinking = false
-        planEntries = []
+        if !steering {
+            isThinking = false
+            planEntries = []
+        }
         eventHandler(.activityChanged)
 
         var queued = false
         let task = Task { @MainActor in
             defer { if self.promptID == id { self.finishPrompt() } }
             do {
-                try await self.startIfNeeded()?.value
-                try Task.checkCancellation()
-                await self.applyPendingSelections(retryRejectedMode: true)
-                try Task.checkCancellation()
-                try self.checkRequestedMode()
+                if !steering {
+                    try await self.startIfNeeded()?.value
+                    try Task.checkCancellation()
+                    await self.applyPendingSelections(retryRejectedMode: true)
+                    try Task.checkCancellation()
+                    try self.checkRequestedMode()
+                }
                 guard let client = self.client, let sid = self.sessionID else {
                     throw ACPClient.ACPError.notRunning
                 }
@@ -364,10 +371,13 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
                 if blocks.isEmpty { blocks.append(["type": "text", "text": trimmed]) }
 
                 let result = try await client.prompt(sessionID: sid, blocks: blocks, beforeQueue: {
-                    try self.checkRequestedMode()
+                    if !steering { try self.checkRequestedMode() }
                 }, onQueued: {
                     queued = true
                     self.promptQueued = true
+                    if self.messages.contains(where: \.isStreaming) {
+                        self.finalizeStreamingMessages(stopReason: steering ? "toolUse" : "stop")
+                    }
                     self.messages.append(ChatMessage(
                         id: "acp-user-\(id.uuidString)", role: .user, text: prepared.displayText,
                         canonicalText: prepared.canonicalText, references: prepared.references,
@@ -620,7 +630,7 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
                 let idx = ensureAssistantMessage(forTool: false, isReplaying: isReplaying)
                 messages[idx].thinking += text
                 if !isReplaying {
-                    isThinking = true
+                    if promptID != nil { isThinking = true }
                     scheduleStreamingBump()
                 }
             }
@@ -637,6 +647,12 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
                 }
             }
             if !isReplaying {
+                if promptID == nil {
+                    messages[idx].completedAt = Date()
+                    if messages[idx].stopReason == nil || messages[idx].stopReason == "toolUse" {
+                        messages[idx].stopReason = "stop"
+                    }
+                }
                 isThinking = false
                 scheduleStreamingBump()
             }
@@ -794,7 +810,7 @@ final class ACPChatController: ObservableObject, Identifiable, HTMLWidgetActionT
             role: .assistant,
             text: "",
             timestamp: Date(),
-            isStreaming: !isReplaying
+            isStreaming: !isReplaying && promptID != nil
         )
         messages.append(message)
         return messages.count - 1

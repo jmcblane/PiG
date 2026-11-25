@@ -24,8 +24,8 @@ struct ComposerView: View {
 
     var body: some View {
         let slash = displayedSlashSuggestions
-        let skills = displayedSkillSuggestions
-        let files = displayedFileSuggestions
+        let skills = (!suggestionsDismissed && slash.isEmpty) ? skillSuggestions : []
+        let files = (!suggestionsDismissed && slash.isEmpty && skills.isEmpty) ? fileSuggestions : []
         let accentFocus = model.composerFocusAccent && isFocused
         VStack(spacing: 8) {
             if let submission = controller.failedPrompt {
@@ -129,6 +129,7 @@ struct ComposerView: View {
         .onChange(of: draft) { _, value in
             suggestionsDismissed = false
             suggestionIndex = 0
+            guard value.contains("$") || value.contains("@") else { return }
             let normalized = ComposerTokenCodec.normalizeExactReferences(
                 in: value,
                 skills: allSlashCommands,
@@ -183,7 +184,8 @@ struct ComposerView: View {
     }
 
     private var skillSuggestions: [ComposerSkillSuggestion] {
-        ComposerCompletion.skillSuggestions(for: draft, commands: allSlashCommands)
+        guard draft.contains("$") else { return [] }
+        return ComposerCompletion.skillSuggestions(for: draft, commands: allSlashCommands)
     }
 
     private var displayedSkillSuggestions: [ComposerSkillSuggestion] {
